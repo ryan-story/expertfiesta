@@ -78,7 +78,8 @@ logs/
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
+# Allow exploration notebooks
+!dgxb_exploration.ipynb
 
 # Environment variables
 .env
