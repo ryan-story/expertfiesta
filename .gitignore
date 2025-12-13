@@ -55,6 +55,10 @@ bronze-weather/*.parquet
 bronze-weather/*.csv
 bronze-weather/*.json
 !bronze-weather/metadata.json
+bronze-traffic/*.parquet
+bronze-traffic/*.csv
+bronze-traffic/*.json
+!bronze-traffic/metadata.json
 data_product/
 *.pkl
 *.joblib
