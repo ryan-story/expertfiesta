@@ -10,7 +10,7 @@ import time
 from sklearn.linear_model import LinearRegression, PoissonRegressor
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
-from sklearn.metrics import make_scorer, mean_squared_error, mean_absolute_error, r2_score
+from sklearn.metrics import make_scorer, mean_squared_error
 from sklearn.preprocessing import StandardScaler
 import xgboost as xgb
 
@@ -166,42 +166,9 @@ def train_logistic_regression(
     """
     Train LogisticRegression with L1 (Lasso) penalty and hyperparameter optimization
     DEPRECATED: Use train_linear_regression for regression tasks
-
-    Args:
-        X_train: Training features
-        y_train: Training target
-        cv_splits: List of (train_indices, test_indices) tuples
-        n_jobs: Number of parallel jobs
-
-    Returns:
-        Tuple of (best_model, best_params, cv_scores, train_time_sec)
+    This function is kept for backward compatibility but should not be used.
     """
-    logger.info("Training LogisticRegression with L1 penalty...")
-
-    # Hyperparameter grid
-    param_grid = {
-        "C": [0.01, 0.1, 1.0, 10.0, 100.0],
-    }
-
-    # Create custom CV from splits
-    # Use list-of-tuples directly (PredefinedSplit causes leakage in rolling-origin CV)
-    cv = [(train_idx, test_idx) for (train_idx, test_idx) in cv_splits]
-
-    # Create model
-    from sklearn.linear_model import LogisticRegression
-    model = LogisticRegression(
-        penalty="l1",
-        solver="liblinear",
-        max_iter=1000,
-        random_state=42,
-    )
-
-    # Use weighted F1 score (precision-weighted)
-    scorer = make_scorer(
-        lambda y_true, y_pred: 0.6 * precision_score(y_true, y_pred, average="weighted")
-        + 0.4 * recall_score(y_true, y_pred, average="weighted"),
-        greater_is_better=True,
-    )
+    raise NotImplementedError("train_logistic_regression is deprecated. Use train_linear_regression for regression tasks.")
 
     # Grid search
     # NOTE: y_train is already encoded per-fold (encoder fit on train folds only)

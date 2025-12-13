@@ -11,7 +11,6 @@ from pathlib import Path
 import logging
 from typing import Dict, Any
 import xgboost as xgb
-from sklearn.model_selection import cross_val_score
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from dgxb.training.cv_splitter import create_rolling_origin_cv
 
@@ -71,7 +70,7 @@ def test_without_incident_count_t(
     X_filtered = X_filtered.fillna(X_filtered.median())
     
     logger.info(f"  Remaining features: {len(X_filtered.columns)}")
-    logger.info(f"  Features kept: weather, calendar, spatial, rolling stats (non-incident)")
+    logger.info("  Features kept: weather, calendar, spatial, rolling stats (non-incident)")
     
     # Create CV splits
     cv_splits = create_rolling_origin_cv(
@@ -125,7 +124,7 @@ def test_without_incident_count_t(
         "n_features_remaining": len(X_filtered.columns),
     }
     
-    logger.info(f"  Results:")
+    logger.info("  Results:")
     logger.info(f"    RMSE: {rmse:.4f}")
     logger.info(f"    MAE: {mae:.4f}")
     logger.info(f"    R²: {r2:.4f}")
@@ -158,11 +157,6 @@ def test_horizon_sensitivity(
     # Keep only numeric columns
     X_numeric = X_rich.select_dtypes(include=[np.number])
     X_numeric = X_numeric.fillna(X_numeric.median())
-    
-    # Create CV splits
-    cv_splits = create_rolling_origin_cv(
-        hour_ts, n_folds=n_folds, val_window_hours=24, gap_hours=1
-    )
     
     results_by_horizon = {}
     
@@ -325,7 +319,7 @@ def test_sector_cold_start(
         "n_test_samples": len(X_test),
     }
     
-    logger.info(f"  Results:")
+    logger.info("  Results:")
     logger.info(f"    RMSE: {rmse:.4f}")
     logger.info(f"    MAE: {mae:.4f}")
     logger.info(f"    R²: {r2:.4f}")

@@ -148,11 +148,11 @@ def compute_cell_hour_f1(
         pred_hour_max_shifted = pred_hour_max + pd.Timedelta(hours=1)
         if pred_hour_max_shifted > label_hour_max:
             logger.warning(
-                f"    ⚠️  Temporal alignment issue: shifted prediction hours exceed label hours"
+                "    ⚠️  Temporal alignment issue: shifted prediction hours exceed label hours"
             )
     else:
         logger.warning(
-            f"  ⚠️  No matching cell-hours found between predictions and labels"
+            "  ⚠️  No matching cell-hours found between predictions and labels"
         )
 
     if len(df_merged) == 0:
