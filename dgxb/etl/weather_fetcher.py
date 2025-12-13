@@ -5,7 +5,6 @@ No API key required, but User-Agent header is required.
 """
 import requests
 import pandas as pd
-import cudf
 from datetime import datetime, timedelta
 import time
 import logging
@@ -114,6 +113,13 @@ class NWSWeatherFetcher:
             except ValueError:
                 continue
             
+            # Make start_date and end_date timezone-aware if timestamp is
+            if timestamp.tzinfo is not None:
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=timestamp.tzinfo)
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=timestamp.tzinfo)
+            
             if timestamp < start_date or timestamp > end_date:
                 continue
             
@@ -205,6 +211,13 @@ class NWSWeatherFetcher:
                 timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
             except ValueError:
                 continue
+            
+            # Make start_date and end_date timezone-aware if timestamp is
+            if timestamp.tzinfo is not None:
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=timestamp.tzinfo)
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=timestamp.tzinfo)
             
             if timestamp < start_date or timestamp > end_date:
                 continue

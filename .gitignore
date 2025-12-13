@@ -50,6 +50,7 @@ Thumbs.db
 !**/metadata.json
 data/
 weather_bronze/
+bronze/
 data_product/
 *.pkl
 *.joblib
