@@ -12,7 +12,6 @@ import logging
 import json
 import pickle
 from typing import Tuple, Optional, List, Any
-import torch
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +335,7 @@ def setup_zero_shot_classifier(model_name: str = "microsoft/deberta-v3-base"):
         Zero-shot classifier pipeline
     """
     try:
+        import torch
         from transformers import pipeline
 
         classifier = pipeline(
