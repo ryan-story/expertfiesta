@@ -20,9 +20,10 @@
 - **CV Splitting**: Time-blocked splits on `hour_ts` (not individual rows)
 - **Baseline Models**: Persistence (y_hat = incident_count_t), Climatology (y_hat = mean per cell, hour_of_week)
 
-**Performance**: 
-- **Champion Model**: XGBoost (rich features) - RMSE: 0.0144, MAE: 0.0025, R²: 0.9910
+**Performance** (with nested CV for proper evaluation): 
+- **Champion Model**: XGBoost (rich features) - RMSE: 0.0457, MAE: 0.0219, R²: 0.9102
 - **Robustness Validated**: No target leakage, horizon sensitivity confirmed, sector generalization verified
+- **Nested CV**: Outer folds for evaluation, inner folds for hyperparameter tuning (prevents overfitting)
 - See `notes/BENCHMARK_REPORT.md` and `notes/ROBUSTNESS_REPORT.md` for detailed results
 
 ### ✅ Implemented Components
@@ -87,6 +88,7 @@
 
 - **`cv_splitter.py`**:
   - `create_rolling_origin_cv()`: Time-blocked splits on `hour_ts`
+  - `create_nested_cv()`: Nested CV (outer for evaluation, inner for hyperparameter tuning)
   - Test set: contiguous time window (e.g., last 24h)
   - Train set: hours strictly before test window (with optional gap)
 
@@ -105,8 +107,9 @@
 
 1. **Performance Optimization**: Removed unnecessary full grid creation (reduced from 1.5M to 7,610 rows)
 2. **Robustness Validation**: Comprehensive validation suite confirms legitimate signal (no leakage)
-3. **Baseline Models**: Persistence and Climatology baselines fully integrated
-4. **Documentation**: Benchmark and robustness reports moved to `notes/` directory
+3. **Nested Cross-Validation**: Implemented proper nested CV (outer for evaluation, inner for hyperparameter tuning)
+4. **Baseline Models**: Persistence and Climatology baselines fully integrated
+5. **Documentation**: Benchmark and robustness reports moved to `notes/` directory
 
 ### 📋 Remaining Work
 

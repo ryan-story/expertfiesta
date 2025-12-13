@@ -34,16 +34,15 @@ if __name__ == "__main__":
         if len(base_champion) > 0:
             champ = base_champion.iloc[0]
             print(f"\nChampion (Base Channel): {champ['model_name']}")
-            print(f"  Weighted F1: {champ['weighted_f1']:.4f}")
-            print(f"  F1 Score: {champ['f1_score']:.4f}")
-            print(f"  Precision: {champ['precision_score']:.4f}")
-            print(f"  Recall: {champ['recall_score']:.4f}")
-            print(f"  Precision@K: {champ['precision_at_k']:.4f}")
-            print(f"  Recall@K: {champ['recall_at_k']:.4f}")
-            print(f"  Staging Utility: {champ['staging_utility_coverage_pct']:.1f}%")
+            print(f"  RMSE: {champ['rmse']:.4f}")
+            print(f"  MAE: {champ['mae']:.4f}")
+            print(f"  R²: {champ['r2']:.4f}")
+            print(f"  Hotspot Precision@K: {champ.get('hotspot_precision_at_k', 0.0):.4f}")
+            print(f"  Hotspot Recall@K: {champ.get('hotspot_recall_at_k', 0.0):.4f}")
+            print(f"  Staging Utility: {champ.get('staging_utility_coverage_pct', 0.0):.1f}%")
             print(f"  Train Time: {champ['train_time_sec']:.2f}s")
             print(
-                f"  Inference Latency (p50): {champ['inference_latency_p50_ms']:.2f}ms"
+                f"  Inference Latency (p50): {champ.get('inference_latency_p50_ms', 0.0):.2f}ms"
             )
 
         # Display champion for rich channel
@@ -53,16 +52,15 @@ if __name__ == "__main__":
         if len(rich_champion) > 0:
             champ = rich_champion.iloc[0]
             print(f"\nChampion (Rich Channel): {champ['model_name']}")
-            print(f"  Weighted F1: {champ['weighted_f1']:.4f}")
-            print(f"  F1 Score: {champ['f1_score']:.4f}")
-            print(f"  Precision: {champ['precision_score']:.4f}")
-            print(f"  Recall: {champ['recall_score']:.4f}")
-            print(f"  Precision@K: {champ['precision_at_k']:.4f}")
-            print(f"  Recall@K: {champ['recall_at_k']:.4f}")
-            print(f"  Staging Utility: {champ['staging_utility_coverage_pct']:.1f}%")
+            print(f"  RMSE: {champ['rmse']:.4f}")
+            print(f"  MAE: {champ['mae']:.4f}")
+            print(f"  R²: {champ['r2']:.4f}")
+            print(f"  Hotspot Precision@K: {champ.get('hotspot_precision_at_k', 0.0):.4f}")
+            print(f"  Hotspot Recall@K: {champ.get('hotspot_recall_at_k', 0.0):.4f}")
+            print(f"  Staging Utility: {champ.get('staging_utility_coverage_pct', 0.0):.1f}%")
             print(f"  Train Time: {champ['train_time_sec']:.2f}s")
             print(
-                f"  Inference Latency (p50): {champ['inference_latency_p50_ms']:.2f}ms"
+                f"  Inference Latency (p50): {champ.get('inference_latency_p50_ms', 0.0):.2f}ms"
             )
 
         print("=" * 70)

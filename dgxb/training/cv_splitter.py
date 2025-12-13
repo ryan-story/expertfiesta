@@ -71,6 +71,72 @@ def create_rolling_origin_cv(
     return splits
 
 
+def create_nested_cv(
+    hour_ts: pd.Series,
+    n_outer_folds: int = 3,
+    n_inner_folds: int = 3,
+    val_window_hours: int = 24,
+    gap_hours: int = 0,
+) -> List[Tuple[np.ndarray, np.ndarray, List[Tuple[np.ndarray, np.ndarray]]]]:
+    """
+    Create nested time-blocked CV splits for proper hyperparameter tuning.
+    
+    Outer CV: Used for final model evaluation (never seen during hyperparameter tuning)
+    Inner CV: Used for hyperparameter tuning (only uses training data from outer fold)
+    
+    Args:
+        hour_ts: Series of hour timestamps (floored to hour) for all data points
+        n_outer_folds: Number of outer CV folds (for final evaluation)
+        n_inner_folds: Number of inner CV folds (for hyperparameter tuning)
+        val_window_hours: Validation window size in hours
+        gap_hours: Optional gap between train and test
+        
+    Returns:
+        List of (outer_train_idx, outer_test_idx, inner_cv_splits) tuples
+        where inner_cv_splits are (inner_train_idx, inner_test_idx) tuples
+        computed only from outer_train_idx data
+    """
+    hour_ts = pd.to_datetime(hour_ts, utc=True)
+    
+    # Create outer CV splits (for final evaluation)
+    outer_splits = create_rolling_origin_cv(
+        hour_ts, n_folds=n_outer_folds, val_window_hours=val_window_hours, gap_hours=gap_hours
+    )
+    
+    nested_splits = []
+    
+    for outer_fold_idx, (outer_train_idx, outer_test_idx) in enumerate(outer_splits):
+        logger.info(f"\n  Outer Fold {outer_fold_idx + 1}:")
+        logger.info(f"    Outer train: {len(outer_train_idx):,} rows")
+        logger.info(f"    Outer test: {len(outer_test_idx):,} rows")
+        
+        # Extract hour_ts for outer training data only
+        # Create a new Series with 0-based index for inner CV
+        hour_ts_train_values = hour_ts.iloc[outer_train_idx].values
+        hour_ts_train_series = pd.Series(hour_ts_train_values, index=range(len(hour_ts_train_values)))
+        
+        # Create inner CV splits from outer training data only
+        # This returns indices relative to hour_ts_train_series (0-based: 0, 1, 2, ...)
+        inner_splits = create_rolling_origin_cv(
+            hour_ts_train_series,
+            n_folds=n_inner_folds,
+            val_window_hours=val_window_hours,
+            gap_hours=gap_hours,
+        )
+        
+        # Inner splits are already 0-based relative to outer_train_idx
+        # They can be used directly with X_train_outer.iloc[inner_train_idx]
+        # No mapping needed - they're already correct!
+        inner_splits_mapped = inner_splits
+        
+        logger.info(f"    Inner CV: {len(inner_splits_mapped)} folds")
+        
+        nested_splits.append((outer_train_idx, outer_test_idx, inner_splits_mapped))
+    
+    logger.info(f"\nCreated {len(nested_splits)} nested CV folds")
+    return nested_splits
+
+
 def create_sliding_backtest_cv(
     timestamps: pd.Series,
     n_folds: int = 3,

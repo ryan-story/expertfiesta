@@ -210,12 +210,18 @@ def run_training_competition(
     logger.info(f"  Reconstructed {len(timestamps):,} timestamps")
     logger.info(f"  Reconstructed {len(h3_cells):,} H3 cells")
 
-    # Step 3: Create CV splits (time-blocked on hour_ts)
-    logger.info("\n[Step 3/6] Creating time-blocked cross-validation splits...")
-    cv_splits = create_rolling_origin_cv(
-        hour_ts, n_folds=n_folds, val_window_hours=val_window_hours, gap_hours=1
+    # Step 3: Create nested CV splits (time-blocked on hour_ts)
+    logger.info("\n[Step 3/6] Creating nested time-blocked cross-validation splits...")
+    from dgxb.training.cv_splitter import create_nested_cv
+    
+    nested_cv_splits = create_nested_cv(
+        hour_ts, 
+        n_outer_folds=n_folds, 
+        n_inner_folds=3,  # Inner folds for hyperparameter tuning
+        val_window_hours=val_window_hours, 
+        gap_hours=1
     )
-    logger.info(f"  Created {len(cv_splits)} CV folds (time-blocked on hour_ts)")
+    logger.info(f"  Created {len(nested_cv_splits)} nested CV folds (outer for evaluation, inner for tuning)")
 
     # Step 4: Train models for each channel
     logger.info("\n[Step 4/6] Training models...")
@@ -343,26 +349,27 @@ def run_training_competition(
                 all_hour_ts_test_baseline = []
                 all_hour_ts_pred_baseline = []
                 
-                for fold_idx, (train_idx, test_idx) in enumerate(cv_splits):
-                    X_train_fold = X_numeric.iloc[train_idx]
-                    X_test_fold = X_numeric.iloc[test_idx]
-                    y_train_fold = y[train_idx]
-                    y_test_fold = y[test_idx]
+                # Use nested CV: inner CV for hyperparameter tuning, outer test for evaluation
+                for outer_fold_idx, (outer_train_idx, outer_test_idx, inner_cv_splits) in enumerate(nested_cv_splits):
+                    X_train_fold = X_numeric.iloc[outer_train_idx].reset_index(drop=True)
+                    X_test_fold = X_numeric.iloc[outer_test_idx]
+                    y_train_fold = y[outer_train_idx]
+                    y_test_fold = y[outer_test_idx]
                     
-                    # Train baseline on this fold
+                    # Train baseline using inner CV for hyperparameter tuning
                     model, best_params, cv_scores, train_time = train_func(
-                        X_train_fold, y_train_fold, [(train_idx, test_idx)]
+                        X_train_fold, y_train_fold, inner_cv_splits
                     )
                     
-                    # Predict on test fold
+                    # Predict on outer test fold (never seen during hyperparameter tuning)
                     y_pred_fold = model.predict(X_test_fold)
                     y_pred_fold = np.maximum(y_pred_fold, 0.0)  # Clip to non-negative
                     
                     all_y_true_baseline.extend(y_test_fold)
                     all_y_pred_baseline.extend(y_pred_fold)
-                    all_h3_test_baseline.extend(h3_cells[test_idx])
-                    all_hour_ts_test_baseline.extend(hour_ts.iloc[test_idx])
-                    all_hour_ts_pred_baseline.extend(hour_ts.iloc[test_idx])
+                    all_h3_test_baseline.extend(h3_cells[outer_test_idx])
+                    all_hour_ts_test_baseline.extend(hour_ts.iloc[outer_test_idx])
+                    all_hour_ts_pred_baseline.extend(hour_ts.iloc[outer_test_idx])
                 
                 # Compute metrics for baseline
                 all_y_true_baseline_arr = np.array(all_y_true_baseline)
@@ -444,45 +451,57 @@ def run_training_competition(
             logger.info(f"    Model: {model_name}")
 
             try:
-                # Train model (use numeric-only features, regression target)
-                if model_name in ["LinearRegression", "PoissonRegressor"]:
-                    model, best_params, cv_scores, train_time = train_func(  # type: ignore
-                        X_numeric, y, cv_splits
-                    )
-                elif model_name == "RandomForest":
-                    model, best_params, cv_scores, train_time = train_func(  # type: ignore
-                        X_numeric, y, cv_splits, n_trials=n_trials_rf
-                    )
-                elif model_name == "XGBoost":
-                    model, best_params, cv_scores, train_time = train_func(  # type: ignore
-                        X_numeric, y, cv_splits, n_trials=n_trials_xgb
-                    )
-
-                # Evaluate on all test folds (regression)
-                # Model predicts incident_count_t_plus_1 at time t
+                # Train and evaluate using nested CV
+                # Outer folds: final evaluation (never seen during hyperparameter tuning)
+                # Inner folds: hyperparameter tuning (only uses outer training data)
                 all_y_true = []
                 all_y_pred = []
                 all_h3_test = []
                 all_hour_ts_test = []
-                all_hour_ts_pred = []  # hour_ts when prediction was made (t)
+                all_hour_ts_pred = []
+                
+                total_train_time = 0.0
 
-                for fold_idx, (train_idx, test_idx) in enumerate(cv_splits):
-                    X_test = X_numeric.iloc[test_idx]
-                    hour_ts_test = hour_ts.iloc[test_idx]
-                    y_test = y[test_idx]
-
-                    y_pred = model.predict(X_test)
+                for outer_fold_idx, (outer_train_idx, outer_test_idx, inner_cv_splits) in enumerate(nested_cv_splits):
+                    logger.info(f"      Outer fold {outer_fold_idx + 1}/{len(nested_cv_splits)}")
                     
-                    # Clip predictions to non-negative (counts can't be negative)
-                    y_pred = np.maximum(y_pred, 0.0)
-
-                    all_y_true.extend(y_test)
-                    all_y_pred.extend(y_pred)
-                    # Use h3_cells from the filtered data (after dropping NaN targets)
-                    all_h3_test.extend(h3_cells[test_idx])
-                    all_hour_ts_test.extend(hour_ts_test)
-                    # Prediction hour_ts is the same as test hour_ts (we predict at t for t+1)
-                    all_hour_ts_pred.extend(hour_ts_test)
+                    # Train model using inner CV for hyperparameter tuning
+                    # Only use outer training data
+                    # Reset index so inner CV splits (0-based) work correctly
+                    X_train_outer = X_numeric.iloc[outer_train_idx].reset_index(drop=True)
+                    y_train_outer = y[outer_train_idx]
+                    
+                    if model_name in ["LinearRegression", "PoissonRegressor"]:
+                        model, best_params, cv_scores, train_time = train_func(  # type: ignore
+                            X_train_outer, y_train_outer, inner_cv_splits
+                        )
+                    elif model_name == "RandomForest":
+                        model, best_params, cv_scores, train_time = train_func(  # type: ignore
+                            X_train_outer, y_train_outer, inner_cv_splits, n_trials=n_trials_rf
+                        )
+                    elif model_name == "XGBoost":
+                        model, best_params, cv_scores, train_time = train_func(  # type: ignore
+                            X_train_outer, y_train_outer, inner_cv_splits, n_trials=n_trials_xgb
+                        )
+                    
+                    total_train_time += train_time
+                    
+                    # Evaluate on outer test set (never seen during hyperparameter tuning)
+                    X_test_outer = X_numeric.iloc[outer_test_idx]
+                    y_test_outer = y[outer_test_idx]
+                    hour_ts_test_outer = hour_ts.iloc[outer_test_idx]
+                    
+                    y_pred_outer = model.predict(X_test_outer)
+                    y_pred_outer = np.maximum(y_pred_outer, 0.0)  # Clip to non-negative
+                    
+                    all_y_true.extend(y_test_outer)
+                    all_y_pred.extend(y_pred_outer)
+                    all_h3_test.extend(h3_cells[outer_test_idx])
+                    all_hour_ts_test.extend(hour_ts_test_outer)
+                    all_hour_ts_pred.extend(hour_ts_test_outer)
+                
+                # Use average training time across folds
+                train_time = total_train_time / len(nested_cv_splits)
 
                 all_y_true_arr = np.array(all_y_true)
                 all_y_pred_arr = np.array(all_y_pred)
