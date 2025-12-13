@@ -38,8 +38,8 @@ if __name__ == "__main__":
         temporal_weight=0.5       # Weight for temporal distance
     )
     
-    print(f"\n✓ Combined pipeline complete!")
+    print("\n✓ Combined pipeline complete!")
     print(f"  X (features): {X_features.shape[0]:,} records, {X_features.shape[1]} features")
     print(f"  y (target): {y_target.shape[0]:,} records")
-    print(f"  Check ./gold-cpu-traffic/ directory for results.")
+    print("  Check ./gold-cpu-traffic/ directory for results.")
 

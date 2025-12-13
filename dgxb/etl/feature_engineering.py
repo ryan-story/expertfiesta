@@ -305,7 +305,7 @@ def fuzzy_merge_h3(
             if len(result_df) == len(traffic_valid):
                 final_df.loc[traffic_valid.index, col] = result_df[col].values
     
-    logger.info(f"Merge complete:")
+    logger.info("Merge complete:")
     logger.info(f"  - Matched: {match_count} records")
     logger.info(f"  - No match: {no_match_count} records")
     if len(traffic_valid) > 0:
@@ -453,7 +453,6 @@ def prepare_ml_features(
         y_encoded: Encoded target (integers for ML)
         label_encoder: Fitted LabelEncoder
     """
-    from sklearn.preprocessing import LabelEncoder
     
     df = df.copy()
     
@@ -578,7 +577,7 @@ def merge_and_save_X_features(
     logger.info("=" * 70)
     
     # Step 1: Load silver data
-    logger.info(f"\n[Step 1/3] Loading silver data...")
+    logger.info("\n[Step 1/3] Loading silver data...")
     logger.info(f"  Traffic: {traffic_silver_path}")
     traffic_df = pd.read_parquet(traffic_silver_path)
     logger.info(f"    Loaded {len(traffic_df)} traffic records")
@@ -588,7 +587,7 @@ def merge_and_save_X_features(
     logger.info(f"    Loaded {len(weather_df)} weather records")
     
     # Step 2: Perform fuzzy merge
-    logger.info(f"\n[Step 2/3] Performing fuzzy merge...")
+    logger.info("\n[Step 2/3] Performing fuzzy merge...")
     merged_df = fuzzy_merge_h3(
         traffic_df=traffic_df,
         weather_df=weather_df,
@@ -609,14 +608,14 @@ def merge_and_save_X_features(
     logger.info(f"  Saved merged data to {merged_intermediate_path} (for Y pipeline)")
     
     # Step 3: Feature engineering (X only - no target)
-    logger.info(f"\n[Step 3/3] Feature engineering (X features)...")
+    logger.info("\n[Step 3/3] Feature engineering (X features)...")
     X_features, y_raw, _, _, _ = prepare_ml_features(
         df=merged_df,
         target_col='description',
         drop_artifacts=True,
     )
     
-    logger.info(f"  Feature engineering complete")
+    logger.info("  Feature engineering complete")
     logger.info(f"    Original columns: {len(merged_df.columns)}")
     logger.info(f"    Feature columns: {len(X_features.columns)}")
     
@@ -693,13 +692,13 @@ def prepare_and_save_y_target(
     logger.info("=" * 70)
     
     # Step 1: Load merged data
-    logger.info(f"\n[Step 1/3] Loading merged data...")
+    logger.info("\n[Step 1/3] Loading merged data...")
     logger.info(f"  Source: {merged_data_path}")
     merged_df = pd.read_parquet(merged_data_path)
     logger.info(f"    Loaded {len(merged_df)} records")
     
     # Step 2: Zero-shot classification for target
-    logger.info(f"\n[Step 2/3] Zero-shot classification for target variable...")
+    logger.info("\n[Step 2/3] Zero-shot classification for target variable...")
     gold_path = Path(gold_output_dir)
     cache_path = gold_path / "zero_shot_classifications.parquet" if use_cached_classifications else None
     
@@ -715,19 +714,19 @@ def prepare_and_save_y_target(
         merged_df['incident_category'] = classifications['predicted_category']
         merged_df['incident_category_confidence'] = classifications['confidence']
         
-        logger.info(f"  Classification complete")
-        logger.info(f"  Category distribution:")
+        logger.info("  Classification complete")
+        logger.info("  Category distribution:")
         for cat, count in merged_df['incident_category'].value_counts().items():
             logger.info(f"    {cat}: {count} ({count/len(merged_df)*100:.1f}%)")
     
     except Exception as e:
         logger.warning(f"  Zero-shot classification failed: {e}")
-        logger.warning(f"  Continuing without classification. Install transformers: pip install transformers torch")
+        logger.warning("  Continuing without classification. Install transformers: pip install transformers torch")
         merged_df['incident_category'] = "Other"
         merged_df['incident_category_confidence'] = 0.0
     
     # Step 3: Prepare target variable (y)
-    logger.info(f"\n[Step 3/3] Preparing target variable (y)...")
+    logger.info("\n[Step 3/3] Preparing target variable (y)...")
     from sklearn.preprocessing import LabelEncoder
     label_encoder = LabelEncoder()
     y_encoded = label_encoder.fit_transform(merged_df['incident_category'])
@@ -744,9 +743,9 @@ def prepare_and_save_y_target(
     if 'incident_id' in merged_df.columns:
         y_target['incident_id'] = merged_df['incident_id']
     
-    logger.info(f"  Target preparation complete")
+    logger.info("  Target preparation complete")
     logger.info(f"    Target records: {len(y_target):,}")
-    logger.info(f"    Category distribution:")
+    logger.info("    Category distribution:")
     for cat, count in merged_df['incident_category'].value_counts().items():
         logger.info(f"      {cat}: {count} ({count/len(merged_df)*100:.1f}%)")
     

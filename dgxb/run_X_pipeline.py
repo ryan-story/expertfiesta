@@ -30,8 +30,8 @@ if __name__ == "__main__":
         temporal_weight=0.5        # Weight for temporal distance
     )
     
-    print(f"\n✓ X Pipeline complete!")
+    print("\n✓ X Pipeline complete!")
     print(f"  X (features): {X_features.shape[0]:,} records, {X_features.shape[1]} features")
-    print(f"  Check ./gold-cpu-traffic/X_features.parquet")
-    print(f"  Run Y pipeline separately: python dgxb/run_Y_pipeline.py")
+    print("  Check ./gold-cpu-traffic/X_features.parquet")
+    print("  Run Y pipeline separately: python dgxb/run_Y_pipeline.py")
 

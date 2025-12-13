@@ -6,11 +6,11 @@ No API key required, free and open source.
 
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import time
 import logging
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 import json
 
 logger = logging.getLogger(__name__)

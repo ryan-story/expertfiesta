@@ -27,7 +27,7 @@ if __name__ == "__main__":
         use_cached_classifications=True,
     )
     
-    print(f"\n✓ Y Pipeline complete!")
+    print("\n✓ Y Pipeline complete!")
     print(f"  y (target): {y_target.shape[0]:,} records")
-    print(f"  Check ./gold-cpu-traffic/y_target.parquet")
+    print("  Check ./gold-cpu-traffic/y_target.parquet")
 
