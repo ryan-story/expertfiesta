@@ -1,0 +1,28 @@
+# GPU Requirements for dgxb-gpu (RAPIDS stack)
+# Requires NVIDIA GPU with CUDA 12.x support
+
+# Core RAPIDS libraries (CUDA 12)
+cudf-cu12>=24.0.0
+cuml-cu12>=24.0.0
+cupy-cuda12x>=13.0.0
+rmm-cu12>=24.0.0
+
+# XGBoost (CUDA-enabled build required)
+xgboost>=2.0.0
+
+# Spatial indexing (CPU-only library)
+h3>=4.0.0
+
+# Data I/O
+pyarrow>=14.0.0
+
+# Optional: Holiday calendars (CPU-only helper)
+holidays>=0.34
+
+# HTTP requests for API fetchers
+requests>=2.31.0
+
+# Note: Install from RAPIDS conda channel for best compatibility:
+# conda install -c rapidsai -c conda-forge -c nvidia cudf-cu12 cuml-cu12 cupy-cuda12x rmm-cu12
+# pip install xgboost h3 pyarrow holidays requests
+
