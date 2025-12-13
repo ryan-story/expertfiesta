@@ -1,0 +1,30 @@
+{
+  "timestamp": "2025-12-12T21:36:31.917893",
+  "row_count": 48,
+  "columns": [
+    "timestamp",
+    "lat",
+    "lon",
+    "temperature",
+    "dewpoint",
+    "humidity",
+    "wind_speed",
+    "wind_direction",
+    "precipitation_probability",
+    "precipitation_amount",
+    "short_forecast",
+    "detailed_forecast",
+    "is_daytime",
+    "date"
+  ],
+  "date_range": {
+    "start": "2025-12-12T22:00:00-06:00",
+    "end": "2025-12-14T21:00:00-06:00"
+  },
+  "locations": [
+    {
+      "lat": 30.2672,
+      "lon": -97.7431
+    }
+  ]
+}

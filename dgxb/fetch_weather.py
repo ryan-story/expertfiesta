@@ -32,13 +32,13 @@ def main():
     
     print(f"Fetching weather data for {len(locations)} locations")
     print(f"Date range: {start_date.date()} to {end_date.date()}")
-    print(f"Output: weather_bronze/")
+    print(f"Output: bronze-weather/")
     
     weather_df = fetch_and_save_weather(
         locations=locations,
         start_date=start_date,
         end_date=end_date,
-        output_dir="weather_bronze"
+        output_dir="bronze-weather"
     )
     
     if weather_df is not None and not weather_df.empty:

@@ -322,7 +322,7 @@ class NWSWeatherFetcher:
 
 def save_weather_bronze(
     weather_df: pd.DataFrame,
-    output_dir: str = "weather_bronze",
+    output_dir: str = "bronze-weather",
     partition_by_date: bool = True
 ):
     """
@@ -380,7 +380,7 @@ def fetch_and_save_weather(
     station_map: Optional[dict] = None
 ):
     """
-    Convenience function: Fetch weather data and save to bronze layer
+    Convenience function: Fetch weather data and save to bronze-weather layer
     """
     fetcher = NWSWeatherFetcher()
     
