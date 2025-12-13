@@ -433,14 +433,14 @@ def measure_inference_latency(
     """
     # Cold-start: First inference
     start_time = time.time()
-    _ = model.predict_proba(X_test.iloc[:batch_size])
+    _ = model.predict(X_test.iloc[:batch_size])
     cold_start_time = (time.time() - start_time) * 1000  # Convert to ms
 
     # Warm-start: Multiple runs
     warm_times = []
     for _ in range(n_warmup + n_runs):
         start_time = time.time()
-        _ = model.predict_proba(X_test.iloc[:batch_size])
+        _ = model.predict(X_test.iloc[:batch_size])
         warm_times.append((time.time() - start_time) * 1000)
 
     # Skip warmup runs

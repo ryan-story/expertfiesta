@@ -821,6 +821,9 @@ def join_and_impute_sector_hour(
     """
     Join incident and weather sector-hour data, with weather imputation fallback
     
+    DEPRECATED: This function is no longer used. Weather imputation is now done
+    inline in merge_and_save_X_features() for better performance.
+    
     Args:
         inc_sector_hour: Aggregated incident data
         wx_sector_hour: Aggregated weather data
@@ -830,81 +833,11 @@ def join_and_impute_sector_hour(
     Returns:
         Combined sector-hour DataFrame with imputed weather
     """
-    logger.info("Joining and imputing sector-hour data...")
-    
-    # Left join: incidents LEFT JOIN weather
+    # This function is kept for backward compatibility but not used
+    # The join and imputation is now done inline in merge_and_save_X_features()
     sector_hour_base = inc_sector_hour.merge(
-        wx_sector_hour, on=["h3_cell", "hour_ts"], how="left"
+        wx_sector_hour, on=["h3_cell", "hour_ts"], how="outer"
     )
-    
-    # Identify missing weather rows
-    weather_cols = [col for col in sector_hour_base.columns if col.startswith("weather_")]
-    missing_weather = sector_hour_base[weather_cols].isna().any(axis=1)
-    
-    if missing_weather.sum() > 0:
-        logger.info(f"  Found {missing_weather.sum()} sector-hours with missing weather")
-        logger.info("  Applying neighbor fallback...")
-        
-        # Get neighbor cells for each h3_cell
-        def get_neighbors(cell):
-            try:
-                try:
-                    return list(h3.grid_ring(cell, k_ring_size))
-                except (AttributeError, TypeError):
-                    return list(h3.k_ring(cell, k_ring_size))
-            except Exception:
-                return []
-        
-        neighbor_cache = {}
-        for cell in sector_hour_base["h3_cell"].unique():
-            neighbor_cache[cell] = get_neighbors(cell)
-        
-        # For each missing weather row, try to fill from neighbors at same hour_ts
-        for idx in sector_hour_base[missing_weather].index:
-            row = sector_hour_base.loc[idx]
-            cell = row["h3_cell"]
-            hour_ts = row["hour_ts"]
-            neighbors = neighbor_cache.get(cell, [])
-            
-            # Find neighbor weather at same hour_ts
-            neighbor_weather = wx_sector_hour[
-                (wx_sector_hour["h3_cell"].isin(neighbors))
-                & (wx_sector_hour["hour_ts"] == hour_ts)
-            ]
-            
-            if len(neighbor_weather) > 0:
-                # Use median of neighbors (only for numeric columns)
-                for col in weather_cols:
-                    if pd.isna(sector_hour_base.loc[idx, col]):
-                        neighbor_values = neighbor_weather[col].dropna()
-                        if len(neighbor_values) > 0:
-                            # Only compute median for numeric columns
-                            if pd.api.types.is_numeric_dtype(neighbor_values):
-                                sector_hour_base.loc[idx, col] = neighbor_values.median()
-                            else:
-                                # For non-numeric, use mode (most common)
-                                sector_hour_base.loc[idx, col] = neighbor_values.mode().iloc[0] if len(neighbor_values.mode()) > 0 else neighbor_values.iloc[0]
-        
-        # Still missing? Use city-wide weather at that hour_ts
-        still_missing = sector_hour_base[weather_cols].isna().any(axis=1)
-        if still_missing.sum() > 0:
-            logger.info(f"  {still_missing.sum()} still missing, using city-wide fallback...")
-            for hour_ts in sector_hour_base[still_missing]["hour_ts"].unique():
-                city_weather = wx_sector_hour[wx_sector_hour["hour_ts"] == hour_ts]
-                if len(city_weather) > 0:
-                    mask = sector_hour_base["hour_ts"] == hour_ts
-                    for col in weather_cols:
-                        if pd.api.types.is_numeric_dtype(city_weather[col]):
-                            city_median = city_weather[col].median()
-                            sector_hour_base.loc[mask & sector_hour_base[col].isna(), col] = city_median
-                        else:
-                            # For non-numeric, use mode
-                            city_mode = city_weather[col].mode()
-                            if len(city_mode) > 0:
-                                sector_hour_base.loc[mask & sector_hour_base[col].isna(), col] = city_mode.iloc[0]
-    
-    logger.info(f"  Final sector-hour base: {len(sector_hour_base)} rows")
-    
     return sector_hour_base
 
 
@@ -1012,25 +945,14 @@ def merge_and_save_X_features(
     merged_df.to_parquet(merged_events_path, index=False)
     logger.info(f"  Saved merged events to {merged_events_path} (for debugging/traceability)")
 
-    # Step 3: Build sector-hour index grid
-    logger.info("\n[Step 3/6] Building sector-hour index grid...")
-    sector_hour_index = build_sector_hour_index(traffic_df, h3_resolution)
-
-    # Step 4: Aggregate incidents to sector-hour
-    logger.info("\n[Step 4/6] Aggregating incidents to sector-hour...")
+    # Step 3: Aggregate incidents to sector-hour (only where incidents exist)
+    logger.info("\n[Step 3/6] Aggregating incidents to sector-hour...")
     inc_sector_hour = aggregate_incidents_to_sector_hour(traffic_df, h3_resolution)
     
-    # Join to index to ensure explicit zeros
-    inc_sector_hour = sector_hour_index.merge(
-        inc_sector_hour, on=["h3_cell", "hour_ts"], how="left"
-    )
-    inc_sector_hour["incident_count"] = inc_sector_hour["incident_count"].fillna(0)
-    # Fill time features from hour_ts
-    inc_sector_hour["hour"] = inc_sector_hour["hour_ts"].dt.hour
-    inc_sector_hour["day_of_week"] = inc_sector_hour["hour_ts"].dt.dayofweek
-    inc_sector_hour["day_of_month"] = inc_sector_hour["hour_ts"].dt.day
-    inc_sector_hour["month"] = inc_sector_hour["hour_ts"].dt.month
-    inc_sector_hour["is_weekend"] = (inc_sector_hour["day_of_week"] >= 5).astype(int)
+    # Fill zeros for incident_count where missing (but don't create full grid)
+    # This keeps data size reasonable - only cells/hours with data or weather
+    if "incident_count" in inc_sector_hour.columns:
+        inc_sector_hour["incident_count"] = inc_sector_hour["incident_count"].fillna(0)
 
     # Step 5: Aggregate weather to sector-hour
     logger.info("\n[Step 5/6] Aggregating weather to sector-hour...")
@@ -1056,9 +978,45 @@ def merge_and_save_X_features(
 
     # Step 6: Join and impute sector-hour data
     logger.info("\n[Step 6/6] Joining and imputing sector-hour data...")
-    sector_hour_base = join_and_impute_sector_hour(
-        inc_sector_hour, wx_sector_hour, h3_resolution, k_ring_size
+    # Join incidents and weather (outer join to keep both)
+    sector_hour_base = inc_sector_hour.merge(
+        wx_sector_hour, on=["h3_cell", "hour_ts"], how="outer"
     )
+    
+    # Fill zeros for incident_count where missing (from weather-only rows)
+    if "incident_count" in sector_hour_base.columns:
+        sector_hour_base["incident_count"] = sector_hour_base["incident_count"].fillna(0)
+    
+    # Fill time features from hour_ts where missing
+    if "hour_ts" in sector_hour_base.columns:
+        sector_hour_base["hour"] = sector_hour_base["hour_ts"].dt.hour
+        sector_hour_base["day_of_week"] = sector_hour_base["hour_ts"].dt.dayofweek
+        sector_hour_base["day_of_month"] = sector_hour_base["hour_ts"].dt.day
+        sector_hour_base["month"] = sector_hour_base["hour_ts"].dt.month
+        sector_hour_base["is_weekend"] = (sector_hour_base["day_of_week"] >= 5).astype(int)
+    
+    # Apply weather imputation (simplified - only for rows that need it)
+    weather_cols = [col for col in sector_hour_base.columns if col.startswith("weather_")]
+    if weather_cols:
+        missing_weather = sector_hour_base[weather_cols].isna().any(axis=1)
+        if missing_weather.sum() > 0:
+            logger.info(f"  Found {missing_weather.sum()} sector-hours with missing weather")
+            logger.info("  Applying city-wide fallback (skipping slow neighbor lookup)...")
+            
+            # Skip neighbor fallback for performance - just use city-wide weather
+            for hour_ts in sector_hour_base[missing_weather]["hour_ts"].unique():
+                city_weather = wx_sector_hour[wx_sector_hour["hour_ts"] == hour_ts]
+                if len(city_weather) > 0:
+                    mask = sector_hour_base["hour_ts"] == hour_ts
+                    for col in weather_cols:
+                        if pd.api.types.is_numeric_dtype(city_weather[col]):
+                            city_median = city_weather[col].median()
+                            sector_hour_base.loc[mask & sector_hour_base[col].isna(), col] = city_median
+                        else:
+                            # For non-numeric, use mode
+                            city_mode = city_weather[col].mode()
+                            if len(city_mode) > 0:
+                                sector_hour_base.loc[mask & sector_hour_base[col].isna(), col] = city_mode.iloc[0]
 
     # Save sector-hour base (canonical modeling table)
     sector_hour_base_path = gold_path / "sector_hour_base.parquet"

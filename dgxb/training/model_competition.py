@@ -162,7 +162,7 @@ def train_logistic_regression(
     y_train: np.ndarray,
     cv_splits: List[Tuple[np.ndarray, np.ndarray]],
     n_jobs: int = -1,
-) -> Tuple[LogisticRegression, Dict[str, Any], Dict[str, float], float]:
+) -> Tuple[Any, Dict[str, Any], Dict[str, float], float]:
     """
     Train LogisticRegression with L1 (Lasso) penalty and hyperparameter optimization
     DEPRECATED: Use train_linear_regression for regression tasks

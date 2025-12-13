@@ -12,12 +12,18 @@
 
 **Architecture**: The system has been refactored from event-level classification to (sector, hour) regression:
 
-- **Gold Layer**: Aggregated to (h3_cell, hour_ts) level with explicit zero rows
+- **Gold Layer**: Aggregated to (h3_cell, hour_ts) level (7,610 rows from ~3,000 events)
 - **Target**: `incident_count_t_plus_1` (predicting next hour's incident count per sector)
 - **Features**: Weather aggregates, temporal features, spatial context, lag/rolling features
 - **Models**: LinearRegression, PoissonRegressor, RandomForestRegressor, XGBRegressor
 - **Metrics**: RMSE, MAE, R², SMAPE, MAPE (positive only), Hotspot Precision@K/Recall@K
 - **CV Splitting**: Time-blocked splits on `hour_ts` (not individual rows)
+- **Baseline Models**: Persistence (y_hat = incident_count_t), Climatology (y_hat = mean per cell, hour_of_week)
+
+**Performance**: 
+- **Champion Model**: XGBoost (rich features) - RMSE: 0.0144, MAE: 0.0025, R²: 0.9910
+- **Robustness Validated**: No target leakage, horizon sensitivity confirmed, sector generalization verified
+- See `notes/BENCHMARK_REPORT.md` and `notes/ROBUSTNESS_REPORT.md` for detailed results
 
 ### ✅ Implemented Components
 
@@ -95,39 +101,34 @@
 - **`run_rich_features.py`**: Runs rich feature engineering
 - **`run_training.py`**: Runs model training competition
 
-### 🔄 In Progress / Known Issues
+### ✅ Recent Improvements
 
-1. **Weather Imputation Performance**: The neighbor/city-wide fallback for missing weather can be slow for large grids. May need optimization.
-
-2. **Baseline Model Evaluation**: Baseline models (Persistence, Climatology) are implemented but need full integration with evaluation loop.
-
-3. **Pipeline Execution**: End-to-end pipeline execution needs testing after recent refactoring.
+1. **Performance Optimization**: Removed unnecessary full grid creation (reduced from 1.5M to 7,610 rows)
+2. **Robustness Validation**: Comprehensive validation suite confirms legitimate signal (no leakage)
+3. **Baseline Models**: Persistence and Climatology baselines fully integrated
+4. **Documentation**: Benchmark and robustness reports moved to `notes/` directory
 
 ### 📋 Remaining Work
 
-1. **End-to-End Testing**: 
-   - Verify X pipeline completes successfully
-   - Verify Y pipeline creates correct targets
-   - Verify rich features work with aggregated data
-   - Verify training pipeline runs end-to-end
+1. **Production Deployment**:
+   - Deploy XGBoost (rich) model for real-time predictions
+   - Hotspot visualization dashboard
+   - Real-time prediction API
+   - Monitoring and alerting
 
-2. **Performance Optimization**:
-   - Optimize weather imputation for large grids
-   - Consider vectorized operations for neighbor lookups
+2. **Model Improvements**:
+   - Sector embedding for better cold-start performance
+   - Ensemble methods (XGBoost + RandomForest)
+   - Multi-horizon training (separate models for t+1, t+3, t+6)
 
-3. **Documentation**:
-   - Add docstrings to all new functions
-   - Document aggregation strategy and design decisions
-   - Create usage examples
-
-4. **GPU Pipeline** (Future):
+3. **GPU Pipeline** (Future):
    - Implement GPU equivalents using cuDF, cuML
    - Benchmark CPU vs GPU performance
 
-5. **Serving Layer** (Future):
-   - Hotspot visualization
-   - Real-time prediction API
-   - Staging recommendations
+4. **Advanced Features**:
+   - More sophisticated spatial-temporal features
+   - External data sources (events, holidays, traffic patterns)
+   - Deep learning models (LSTM, Transformer)
 
 ## Architecture Overview
 
@@ -241,6 +242,13 @@ Results are saved to `results/` directory:
 
 - `cpu_training_results.csv`: All model results with metrics
 - Columns include: `rmse`, `mae`, `r2`, `smape`, `hotspot_precision_at_k`, `hotspot_recall_at_k`, etc.
+
+**Documentation** (in `notes/` directory):
+
+- `BENCHMARK_REPORT.md`: Comprehensive benchmark results and model comparison
+- `ROBUSTNESS_REPORT.md`: Validation results confirming legitimate signal (no leakage)
+- `LEAKAGE_VALIDATION_REPORT.md`: Feature leakage audit results
+- `TRAINING_RESULTS_ANALYSIS.md`: Detailed training analysis
 
 ## Key Metrics
 

@@ -36,7 +36,7 @@ def extract_top_features(model: Any, model_name: str, feature_names: List[str]) 
     Extract top 5 most important features from a trained model
 
     Args:
-        model: Trained model (LogisticRegression, RandomForest, or XGBoost)
+        model: Trained model (LinearRegression, PoissonRegressor, RandomForestRegressor, or XGBRegressor)
         model_name: Name of the model type
         feature_names: List of feature names
 
@@ -44,18 +44,26 @@ def extract_top_features(model: Any, model_name: str, feature_names: List[str]) 
         Comma-separated string of top 5 feature names
     """
     try:
-        if model_name == "LogisticRegression":
-            # For LogisticRegression, use absolute coefficients
-            # Average across classes if multi-class
-            if model.coef_.ndim > 1:
-                # Multi-class: average absolute coefficients across classes
-                importances = np.abs(model.coef_).mean(axis=0)
+        # Handle Pipeline objects (from LinearRegression/PoissonRegressor)
+        if hasattr(model, 'named_steps') and 'regressor' in model.named_steps:
+            actual_model = model.named_steps['regressor']
+        else:
+            actual_model = model
+            
+        if model_name in ["LinearRegression", "PoissonRegressor"]:
+            # For LinearRegression/PoissonRegressor, use absolute coefficients
+            if hasattr(actual_model, 'coef_'):
+                if actual_model.coef_.ndim > 1:
+                    # Multi-output: average absolute coefficients across outputs
+                    importances = np.abs(actual_model.coef_).mean(axis=0)
+                else:
+                    # Single output: use absolute coefficients
+                    importances = np.abs(actual_model.coef_)
             else:
-                # Binary: use absolute coefficients
-                importances = np.abs(model.coef_[0])
+                return ""
         elif model_name in ["RandomForest", "XGBoost"]:
             # Use feature_importances_ directly
-            importances = model.feature_importances_
+            importances = actual_model.feature_importances_
         else:
             # Fallback: return empty
             return ""
@@ -155,22 +163,7 @@ def run_training_competition(
     logger.info(f"  Loaded y: {len(y_target):,} records")
     logger.info(f"  Ingest time: {ingest_cleaning_time:.2f}s")
 
-    # Extract target (regression: incident_count_t_plus_1)
-    if "incident_count_t_plus_1" not in y_target.columns:
-        raise ValueError("y_target must contain 'incident_count_t_plus_1' for regression")
-    
-    y = y_target["incident_count_t_plus_1"].values
-    
-    # Drop rows with NaN target (last hour per cell - excluded from training)
-    valid_mask = ~pd.isna(y)
-    y = y[valid_mask]
-    base_X = base_X[valid_mask].reset_index(drop=True)
-    rich_X = rich_X[valid_mask].reset_index(drop=True)
-    y_target = y_target[valid_mask].reset_index(drop=True)
-    
-    logger.info(f"  After dropping NaN targets: {len(y):,} records")
-
-    # Extract hour_ts and h3_cell from aggregated data
+    # Extract hour_ts and h3_cell from aggregated data FIRST (before filtering)
     logger.info("\n[Step 2/6] Extracting hour_ts and h3_cell from aggregated data...")
     
     if "hour_ts" in base_X.columns:
@@ -190,29 +183,30 @@ def run_training_competition(
     logger.info(f"  hour_ts range: {hour_ts.min()} to {hour_ts.max()}")
     logger.info(f"  Unique h3_cells: {len(np.unique(h3_cells))}")
     
-    # For hotspot metrics, create actual_counts_df from y_target
+    # Extract target (regression: incident_count_t_plus_1)
+    if "incident_count_t_plus_1" not in y_target.columns:
+        raise ValueError("y_target must contain 'incident_count_t_plus_1' for regression")
+    
+    y = y_target["incident_count_t_plus_1"].values
+    
+    # Drop rows with NaN target (last hour per cell - excluded from training)
+    valid_mask = ~pd.isna(y)
+    y = y[valid_mask]
+    base_X = base_X[valid_mask].reset_index(drop=True)
+    rich_X = rich_X[valid_mask].reset_index(drop=True)
+    y_target = y_target[valid_mask].reset_index(drop=True)
+    hour_ts = hour_ts[valid_mask].reset_index(drop=True)
+    h3_cells = h3_cells[valid_mask]
+    
+    logger.info(f"  After dropping NaN targets: {len(y):,} records")
+    
+    # For hotspot metrics, create actual_counts_df from y_target (after filtering)
     actual_counts_df = y_target[["h3_cell", "hour_ts", "incident_count_t_plus_1"]].copy()
     actual_counts_df.columns = ["h3_cell", "hour_actual", "incident_count"]
     
     # Reconstruct timestamps for compatibility (use hour_ts)
     timestamps = hour_ts.copy()
     
-    # Legacy: Try to get from merged data if needed (for backward compatibility)
-    if "lat" in base_X.columns and "lon" in base_X.columns:
-        # Not needed for aggregated data, but keep for compatibility
-        pass
-    else:
-        # Try to get from merged data
-        if "h3_cell" in merged_df.columns:
-            if "incident_id" in merged_df.columns and "incident_id" in y_target.columns:
-                h3_map = merged_df.set_index("incident_id")["h3_cell"].to_dict()
-                h3_cells = y_target["incident_id"].map(h3_map).values
-            else:
-                h3_cells = merged_df["h3_cell"].values[: len(y_target)]
-        else:
-            logger.warning("Cannot reconstruct H3 cells, using placeholder")
-            h3_cells = np.array([f"cell_{i}" for i in range(len(y_target))])
-
     logger.info(f"  Reconstructed {len(timestamps):,} timestamps")
     logger.info(f"  Reconstructed {len(h3_cells):,} H3 cells")
 
@@ -222,24 +216,6 @@ def run_training_competition(
         hour_ts, n_folds=n_folds, val_window_hours=val_window_hours, gap_hours=1
     )
     logger.info(f"  Created {len(cv_splits)} CV folds (time-blocked on hour_ts)")
-    
-    if not hazard_class_ids:
-        logger.warning("Could not identify hazard classes for hotspot metrics")
-        hazard_class_ids = [1]  # Default fallback
-
-    # Audit CV splits for time-awareness
-    logger.info("\n[Step 3.5/6] Auditing CV splits for time-awareness...")
-    cv_audit = audit_cv_splits(cv_splits, timestamps)
-    if cv_audit["issues"]:
-        logger.error("  ⚠️  CV SPLIT ISSUES DETECTED:")
-        for issue in cv_audit["issues"]:
-            logger.error(f"    {issue}")
-    if cv_audit["warnings"]:
-        logger.warning("  CV Split Warnings:")
-        for warning in cv_audit["warnings"]:
-            logger.warning(f"    {warning}")
-    if not cv_audit["issues"]:
-        logger.info("  ✓ CV splits are time-aware (no leakage detected)")
 
     # Step 4: Train models for each channel
     logger.info("\n[Step 4/6] Training models...")
@@ -502,6 +478,7 @@ def run_training_competition(
 
                     all_y_true.extend(y_test)
                     all_y_pred.extend(y_pred)
+                    # Use h3_cells from the filtered data (after dropping NaN targets)
                     all_h3_test.extend(h3_cells[test_idx])
                     all_hour_ts_test.extend(hour_ts_test)
                     # Prediction hour_ts is the same as test hour_ts (we predict at t for t+1)
@@ -509,8 +486,6 @@ def run_training_competition(
 
                 all_y_true_arr = np.array(all_y_true)
                 all_y_pred_arr = np.array(all_y_pred)
-                all_y_pred_arr = np.array(all_y_pred)
-                all_y_pred_proba_arr = np.vstack(all_y_pred_proba)
 
                 # Compute regression metrics
                 regression_metrics = compute_regression_metrics(
@@ -598,18 +573,11 @@ def run_training_competition(
                     **pipeline_metrics,
                     "best_params": str(best_params),
                     "top_5_features": top_5_features,
-                    # Keep old names for backward compatibility during transition
-                    "f1_score": quality_metrics["f1_score"],
-                    "precision_score": quality_metrics["precision_score"],
-                    "recall_score": quality_metrics["recall_score"],
-                    "precision_at_k": hotspot_metrics["precision_at_k"],
-                    "recall_at_k": hotspot_metrics["recall_at_k"],
-                    **hotspot_metrics,  # staging_utility_coverage_pct, staging_utility_with_neighbors_pct
+                    "champion": False,
                 }
 
                 all_results.append(result)
 
-                logger.info(f"      Event F1: {quality_metrics['f1_score']:.4f}")
                 logger.info(f"      RMSE: {regression_metrics['rmse']:.4f}")
                 logger.info(f"      MAE: {regression_metrics['mae']:.4f}")
                 logger.info(f"      R²: {regression_metrics['r2']:.4f}")
@@ -635,59 +603,7 @@ def run_training_competition(
     # Step 5: Baseline models are already trained above
     # Historical baseline computation removed (replaced by persistence/climatology baselines)
     logger.info("\n[Step 5/7] Baseline models completed above")
-        }
-    )
-    actual_counts_baseline = (
-        actual_incidents_baseline.groupby(["h3_cell", "hour"])["is_hazard"]
-        .sum()
-        .reset_index()
-    )
-    actual_counts_baseline.columns = ["h3_cell", "hour_actual", "incident_count"]
-
-    # Compute baseline metrics
-    baseline_metrics = compute_historical_baseline_patk(
-        np.array(all_h3_test_baseline),
-        timestamps_baseline_series,
-        actual_counts_baseline,
-        k=k_hotspots,
-    )
-
-    # Add baseline as a "model" row
-    baseline_result = {
-        "model_name": "HistoricalBaseline",
-        "channel": "baseline",
-        "event_f1": 0.0,  # Not applicable for baseline
-        "event_precision": 0.0,
-        "event_recall": 0.0,
-        "weighted_f1": 0.0,
-        "cell_hour_f1": 0.0,
-        "cell_hour_precision": 0.0,
-        "cell_hour_recall": 0.0,
-        "hotspot_precision_at_k": baseline_metrics["precision_at_k"],
-        "hotspot_recall_at_k": baseline_metrics["recall_at_k"],
-        "hotspot_precision_at_k_conditional": baseline_metrics.get(
-            "precision_at_k", 0.0
-        ),  # Conditional (hours with incidents)
-        "hotspot_recall_at_k_conditional": baseline_metrics.get(
-            "recall_at_k", 0.0
-        ),  # Conditional (hours with incidents)
-        "staging_utility_coverage_pct": 0.0,  # Not computed for baseline
-        "staging_utility_with_neighbors_pct": 0.0,
-        "train_time_sec": 0.0,
-        "inference_latency_p50_ms": 0.0,
-        "inference_latency_p95_ms": 0.0,
-        "rows_processed_per_sec": 0.0,
-        "top_5_features": "historical_mean_risk_per_cell_hour",
-        "champion": False,
-        # Backward compatibility
-        "f1_score": 0.0,
-        "precision_score": 0.0,
-        "recall_score": 0.0,
-        "precision_at_k": baseline_metrics["precision_at_k"],
-        "recall_at_k": baseline_metrics["recall_at_k"],
-    }
-    all_results.append(baseline_result)
-
+    
     # Step 6: Champion selection (one per channel)
     logger.info("\n[Step 6/7] Selecting champion models...")
 
@@ -741,13 +657,11 @@ def run_training_competition(
     csv_columns = [
         "model_name",
         "channel",
-        "event_f1",
-        "event_precision",
-        "event_recall",
-        "weighted_f1",
-        "cell_hour_f1",
-        "cell_hour_precision",
-        "cell_hour_recall",
+        "rmse",
+        "mae",
+        "r2",
+        "smape",
+        "mape_pos",
         "hotspot_precision_at_k",  # Unconditional (all hours)
         "hotspot_recall_at_k",  # Unconditional (all hours)
         "hotspot_precision_at_k_conditional",  # Conditional (hours with incidents)

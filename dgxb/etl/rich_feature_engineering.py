@@ -109,7 +109,16 @@ def add_extended_temporal_features(
     df["is_month_end"] = df[timestamp_col].dt.is_month_end.astype(int)
 
     # Days since year start
-    year_start = df[timestamp_col].dt.to_period("Y").dt.start_time
+    # Handle timezone-aware timestamps properly
+    if df[timestamp_col].dt.tz is not None:
+        # For timezone-aware, convert to naive, compute year start, then add timezone back
+        tz = df[timestamp_col].dt.tz
+        naive_timestamps = df[timestamp_col].dt.tz_localize(None)
+        year_start_naive = naive_timestamps.dt.to_period("Y").dt.start_time
+        # Convert to datetime and add timezone
+        year_start = pd.Series(pd.to_datetime(year_start_naive), index=df.index).dt.tz_localize(tz)
+    else:
+        year_start = df[timestamp_col].dt.to_period("Y").dt.start_time
     df["days_since_year_start"] = (df[timestamp_col] - year_start).dt.days
 
     logger.info(
