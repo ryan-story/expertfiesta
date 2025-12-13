@@ -196,7 +196,10 @@ def run_training_competition(
     logger.info(f"  After dropping NaN targets: {len(y):,} records")
     
     # For hotspot metrics, create actual_counts_df from y_target (after filtering)
+    # CRITICAL: incident_count_t_plus_1 represents incidents at hour_ts + 1, so hour_actual must be hour_ts + 1
     actual_counts_df = y_target[["h3_cell", "hour_ts", "incident_count_t_plus_1"]].copy()
+    actual_counts_df["hour_actual"] = pd.to_datetime(actual_counts_df["hour_ts"], utc=True) + pd.Timedelta(hours=1)
+    actual_counts_df = actual_counts_df[["h3_cell", "hour_actual", "incident_count_t_plus_1"]].copy()
     actual_counts_df.columns = ["h3_cell", "hour_actual", "incident_count"]
     
     # Reconstruct timestamps for compatibility (use hour_ts)
@@ -375,19 +378,18 @@ def run_training_competition(
                 )
                 
                 # Build actual counts for hotspot metrics
-                hour_ts_test_baseline_series = pd.Series(all_hour_ts_test_baseline)
-                if not isinstance(hour_ts_test_baseline_series, pd.DatetimeIndex):
-                    hour_ts_test_baseline_series = pd.to_datetime(hour_ts_test_baseline_series, utc=True)
-                
-                test_hours_baseline = hour_ts_test_baseline_series.dt.floor("h").unique()
-                actual_counts_baseline = actual_counts_df[
-                    actual_counts_df["hour_actual"].isin(test_hours_baseline)
-                ].copy()
-                
                 hour_ts_pred_baseline_series = pd.Series(all_hour_ts_pred_baseline)
                 if not isinstance(hour_ts_pred_baseline_series, pd.DatetimeIndex):
                     hour_ts_pred_baseline_series = pd.to_datetime(hour_ts_pred_baseline_series, utc=True)
+                
+                # Predictions are made at hour t, so actuals should be at hour t+1
                 hour_ts_actual_baseline_series = hour_ts_pred_baseline_series + pd.Timedelta(hours=1)
+                
+                # Filter actual_counts_df to actual hours (t+1)
+                actual_hours_baseline = hour_ts_actual_baseline_series.dt.floor("h").unique()
+                actual_counts_baseline = actual_counts_df[
+                    actual_counts_df["hour_actual"].isin(actual_hours_baseline)
+                ].copy()
                 
                 hotspot_metrics_baseline = compute_hotspot_metrics(
                     all_y_pred_baseline_arr,
