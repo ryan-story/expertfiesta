@@ -36,7 +36,7 @@ class AustinTrafficFetcher:
         try:
             response = self.session.get(self.BASE_URL, params=params, timeout=30)
             response.raise_for_status()
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {e}")
             raise
@@ -52,7 +52,7 @@ class AustinTrafficFetcher:
         Fetch traffic incidents from Austin API (Socrata format)
         Returns DataFrame compatible with DGXB data product schema
         """
-        params = {"$limit": limit, "$offset": offset}
+        params: Dict[str, Any] = {"$limit": limit, "$offset": offset}
 
         if where_clause:
             params["$where"] = where_clause

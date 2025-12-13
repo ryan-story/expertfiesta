@@ -22,6 +22,11 @@ streamlit>=1.28.0
 plotly>=5.17.0
 matplotlib>=3.7.0
 
+# Jupyter
+jupyter>=1.0.0
+notebook>=7.0.0
+ipykernel>=6.25.0
+
 # Utilities
 pyyaml>=6.0
 tqdm>=4.66.0

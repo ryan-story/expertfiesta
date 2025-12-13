@@ -177,7 +177,10 @@ def clean_weather_data(df: pd.DataFrame) -> pd.DataFrame:
         "dewpoint",
         "humidity",
         "wind_speed",
+        "wind_direction",
         "precipitation_amount",
+        "precipitation_probability",
+        "weather_code",
     ]
     for field in numeric_fields:
         if field in df.columns:
