@@ -509,22 +509,20 @@ def run_training_competition(
                 )
 
                 # Build actual incident counts per (H3, hour) from test data
-                # Use actual_counts_df (already created from y_target)
-                hour_ts_test_series = pd.Series(all_hour_ts_test)
-                if not isinstance(hour_ts_test_series, pd.DatetimeIndex):
-                    hour_ts_test_series = pd.to_datetime(hour_ts_test_series, utc=True)
-                
-                # Filter actual_counts_df to test hours
-                test_hours = hour_ts_test_series.dt.floor("h").unique()
-                actual_counts = actual_counts_df[
-                    actual_counts_df["hour_actual"].isin(test_hours)
-                ].copy()
-
-                # Fix timestamp alignment: predictions at t, actuals at t+1
+                # Use actual_counts_df (already created from y_target with hour_actual = hour_ts + 1)
+                # Predictions are made at hour t, actuals are at hour t+1 (already aligned in actual_counts_df)
                 hour_ts_pred_series = pd.Series(all_hour_ts_pred)
                 if not isinstance(hour_ts_pred_series, pd.DatetimeIndex):
                     hour_ts_pred_series = pd.to_datetime(hour_ts_pred_series, utc=True)
+                
+                # Predictions are made at hour t, so actuals should be at hour t+1
                 hour_ts_actual_series = hour_ts_pred_series + pd.Timedelta(hours=1)
+                
+                # Filter actual_counts_df to actual hours (t+1)
+                actual_hours = hour_ts_actual_series.dt.floor("h").unique()
+                actual_counts = actual_counts_df[
+                    actual_counts_df["hour_actual"].isin(actual_hours)
+                ].copy()
 
                 # Compute hotspot metrics (regression: use y_pred directly)
                 hotspot_metrics = compute_hotspot_metrics(
