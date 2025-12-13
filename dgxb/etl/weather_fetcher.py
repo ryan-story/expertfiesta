@@ -40,7 +40,7 @@ class NWSWeatherFetcher:
             time.sleep(self.rate_limit_delay - elapsed)
         self.last_request_time = time.time()
 
-    def _make_request(self, url: str, params: dict = None) -> dict:
+    def _make_request(self, url: str, params: Optional[dict] = None) -> dict:
         """Make API request with rate limiting"""
         self._rate_limit()
         try:
