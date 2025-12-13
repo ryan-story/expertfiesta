@@ -1,0 +1,33 @@
+# DGXB Requirements
+# Core data processing
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=12.0.0
+
+# Spatial indexing
+h3>=3.7.0
+
+# Machine learning (CPU)
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+
+# GPU stack (RAPIDS)
+# Note: Install via conda for best compatibility
+# cudf-cu11>=24.02
+# cuspatial-cu11>=24.02
+# cuml-cu11>=24.02
+
+# Visualization
+streamlit>=1.28.0
+plotly>=5.17.0
+matplotlib>=3.7.0
+
+# Utilities
+pyyaml>=6.0
+tqdm>=4.66.0
+joblib>=1.3.0
+requests>=2.31.0
+
+# Optional: Optimization
+# ortools>=9.8
+
