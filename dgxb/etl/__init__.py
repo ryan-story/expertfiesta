@@ -4,7 +4,7 @@ Includes CPU and GPU ingestion, feature building, and data fetching
 """
 
 from .weather_fetcher import (
-    NWSWeatherFetcher,
+    OpenMeteoWeatherFetcher,
     fetch_and_save_weather,
     save_weather_bronze,
 )
@@ -21,8 +21,17 @@ from .silver_processor import (
     clean_weather_data,
 )
 
+from .feature_engineering import (
+    fuzzy_merge_h3,
+    merge_and_save_to_gold,
+    merge_and_save_X_features,
+    prepare_and_save_y_target,
+    prepare_ml_features,
+    classify_incident_zero_shot,
+)
+
 __all__ = [
-    "NWSWeatherFetcher",
+    "OpenMeteoWeatherFetcher",
     "fetch_and_save_weather",
     "save_weather_bronze",
     "AustinTrafficFetcher",
@@ -33,4 +42,10 @@ __all__ = [
     "load_bronze_parquets",
     "clean_traffic_data",
     "clean_weather_data",
+    "fuzzy_merge_h3",
+    "merge_and_save_to_gold",
+    "merge_and_save_X_features",
+    "prepare_and_save_y_target",
+    "prepare_ml_features",
+    "classify_incident_zero_shot",
 ]

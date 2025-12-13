@@ -67,6 +67,10 @@ silver-cpu-weather/*.parquet
 silver-cpu-weather/*.csv
 silver-cpu-weather/*.json
 !silver-cpu-weather/metadata.json
+gold-cpu-traffic/*.parquet
+gold-cpu-traffic/*.pkl
+gold-cpu-traffic/*.json
+!gold-cpu-traffic/*_metadata.json
 data_product/
 *.pkl
 *.joblib

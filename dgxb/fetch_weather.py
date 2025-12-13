@@ -26,12 +26,13 @@ def main():
         (30.2244, -97.7694),  # South Austin
     ]
 
-    # Fetch last 7 days of forecast data
+    # Fetch data for date range (will automatically split historical/forecast)
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=7)
+    start_date = end_date - timedelta(days=30)  # Last 30 days
 
     print(f"Fetching weather data for {len(locations)} locations")
     print(f"Date range: {start_date.date()} to {end_date.date()}")
+    print("Will fetch both historical and forecast data")
     print("Output: bronze-weather/")
 
     weather_df = fetch_and_save_weather(
@@ -39,6 +40,8 @@ def main():
         start_date=start_date,
         end_date=end_date,
         output_dir="bronze-weather",
+        include_historical=True,
+        include_forecast=True,
     )
 
     if weather_df is not None and not weather_df.empty:
