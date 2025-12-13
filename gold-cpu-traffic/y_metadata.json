@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-12-13T13:15:49.860207",
+  "row_count": 7610,
+  "target_columns": [
+    "h3_cell",
+    "hour_ts",
+    "incident_count_t",
+    "incident_count_t_plus_1"
+  ],
+  "target_type": "regression",
+  "target_variable": "incident_count_t_plus_1",
+  "pipeline": "y_target_regression"
+}

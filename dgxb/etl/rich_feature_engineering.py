@@ -109,7 +109,18 @@ def add_extended_temporal_features(
     df["is_month_end"] = df[timestamp_col].dt.is_month_end.astype(int)
 
     # Days since year start
-    year_start = df[timestamp_col].dt.to_period("Y").dt.start_time
+    # Handle timezone-aware timestamps properly
+    if df[timestamp_col].dt.tz is not None:
+        # For timezone-aware, convert to naive, compute year start, then add timezone back
+        tz = df[timestamp_col].dt.tz
+        naive_timestamps = df[timestamp_col].dt.tz_localize(None)
+        year_start_naive = naive_timestamps.dt.to_period("Y").dt.start_time
+        # Convert to datetime and add timezone
+        year_start = pd.Series(
+            pd.to_datetime(year_start_naive), index=df.index
+        ).dt.tz_localize(tz)
+    else:
+        year_start = df[timestamp_col].dt.to_period("Y").dt.start_time
     df["days_since_year_start"] = (df[timestamp_col] - year_start).dt.days
 
     logger.info(
@@ -439,64 +450,153 @@ def enrich_X_features(
         f"    Loaded {len(X_base):,} records with {len(X_base.columns)} features"
     )
 
-    # Step 2: Load merged intermediate to get timestamp
-    logger.info("\n[Step 2/6] Loading merged intermediate data for timestamp...")
-    logger.info(f"  Source: {merged_intermediate_path}")
-    merged_df = pd.read_parquet(merged_intermediate_path)
+    # Step 2: Ensure timestamp/hour_ts exists in X
+    logger.info("\n[Step 2/6] Ensuring timestamp exists in X...")
 
-    # Merge timestamp back into X
-    # Try to merge on incident_id first, then fall back to index alignment
-    if "incident_id" in merged_df.columns:
-        if "incident_id" in X_base.columns:
-            # Merge on incident_id
-            timestamp_map = merged_df.set_index("incident_id")["timestamp"].to_dict()
-            X_base["timestamp"] = X_base["incident_id"].map(timestamp_map)
-            logger.info("    Merged timestamp using incident_id")
+    # Check if hour_ts exists (aggregated data) or if we need to load from merged_intermediate
+    if "hour_ts" in X_base.columns:
+        # Aggregated data - use hour_ts as timestamp
+        logger.info("  Found hour_ts in X (aggregated data)")
+        X_base = X_base.copy()
+        X_base["timestamp"] = pd.to_datetime(X_base["hour_ts"], utc=True)
+    elif "timestamp" in X_base.columns:
+        # Already has timestamp
+        logger.info("  Found timestamp in X")
+        X_base["timestamp"] = pd.to_datetime(X_base["timestamp"], utc=True)
+    else:
+        # Need to load from merged_intermediate (legacy event-level data)
+        logger.info(f"  Loading timestamp from {merged_intermediate_path}")
+        merged_df = pd.read_parquet(merged_intermediate_path)
+
+        # Merge timestamp back into X
+        # Try to merge on incident_id first, then fall back to index alignment
+        if "incident_id" in merged_df.columns:
+            if "incident_id" in X_base.columns:
+                # Merge on incident_id
+                timestamp_map = merged_df.set_index("incident_id")[
+                    "timestamp"
+                ].to_dict()
+                X_base["timestamp"] = X_base["incident_id"].map(timestamp_map)
+                logger.info("    Merged timestamp using incident_id")
+            else:
+                # X_base doesn't have incident_id, try to add it from merged
+                # Assume same order if lengths match
+                if len(X_base) == len(merged_df):
+                    X_base["timestamp"] = merged_df["timestamp"].values
+                    logger.info("    Merged timestamp using index alignment")
+                else:
+                    logger.warning("Cannot merge timestamp - data length mismatch")
+                    X_base["timestamp"] = None
         else:
-            # X_base doesn't have incident_id, try to add it from merged
-            # Assume same order if lengths match
+            # No incident_id, assume same order
             if len(X_base) == len(merged_df):
                 X_base["timestamp"] = merged_df["timestamp"].values
                 logger.info("    Merged timestamp using index alignment")
             else:
                 logger.warning("Cannot merge timestamp - data length mismatch")
                 X_base["timestamp"] = None
+
+        logger.info("    Merged timestamp into X features")
+
+    # Step 3: Ensure proper grouping key exists
+    # For aggregated data, group by h3_cell; for event-level, use incident_id or index
+    if "h3_cell" in X_base.columns:
+        group_key = "h3_cell"
+        logger.info("  Using h3_cell as grouping key (aggregated data)")
+    elif "incident_id" in X_base.columns:
+        group_key = "incident_id"
+        logger.info("  Using incident_id as grouping key (event-level data)")
     else:
-        # No incident_id, assume same order
-        if len(X_base) == len(merged_df):
-            X_base["timestamp"] = merged_df["timestamp"].values
-            logger.info("    Merged timestamp using index alignment")
-        else:
-            logger.warning("Cannot merge timestamp - data length mismatch")
-            X_base["timestamp"] = None
+        group_key = None
+        logger.warning(
+            "  No grouping key found - lag/rolling features may be incorrect"
+        )
 
-    logger.info("    Merged timestamp into X features")
-
-    # Step 3: Add time binning features
-    logger.info("\n[Step 3/6] Adding time binning features...")
+    # Step 4: Add time binning features
+    logger.info("\n[Step 4/7] Adding time binning features...")
     X_enriched = add_time_binning_features(X_base.copy(), timestamp_col="timestamp")
 
-    # Step 4: Add extended temporal features
-    logger.info("\n[Step 4/6] Adding extended temporal features...")
+    # Step 5: Add extended temporal features
+    logger.info("\n[Step 5/7] Adding extended temporal features...")
     X_enriched = add_extended_temporal_features(X_enriched, timestamp_col="timestamp")
 
-    # Step 5: Add lag features
-    logger.info("\n[Step 5/6] Adding lag features...")
-    X_enriched = add_lag_features(
-        X_enriched,
-        timestamp_col="timestamp",
-        feature_cols=lag_feature_cols,
-        lag_windows=lag_windows,
-    )
+    # Step 6: Add lag features (group by h3_cell for aggregated data)
+    logger.info("\n[Step 6/7] Adding lag features...")
+    if group_key:
+        # For aggregated data, compute lags per h3_cell
+        X_enriched = X_enriched.sort_values([group_key, "timestamp"]).reset_index(
+            drop=True
+        )
+        # Group by h3_cell and compute lags within each group
+        lag_cols = lag_feature_cols or [
+            c
+            for c in X_enriched.columns
+            if c.startswith("weather_")
+            and c
+            in [
+                "weather_temperature",
+                "weather_humidity",
+                "weather_wind_speed",
+                "weather_precipitation_amount",
+                "weather_precipitation_probability",
+            ]
+        ]
+        for col in lag_cols:
+            if col in X_enriched.columns:
+                for lag_hours in lag_windows:
+                    X_enriched[f"{col}_lag_{lag_hours}h"] = X_enriched.groupby(
+                        group_key
+                    )[col].shift(lag_hours)
+    else:
+        X_enriched = add_lag_features(
+            X_enriched,
+            timestamp_col="timestamp",
+            feature_cols=lag_feature_cols,
+            lag_windows=lag_windows,
+        )
 
-    # Step 6: Add rolling statistics
-    logger.info("\n[Step 6/7] Adding rolling statistics...")
-    X_enriched = add_rolling_statistics(
-        X_enriched,
-        timestamp_col="timestamp",
-        feature_cols=rolling_feature_cols,
-        rolling_windows=rolling_windows,
-    )
+    # Step 7: Add rolling statistics (group by h3_cell for aggregated data)
+    logger.info("\n[Step 7/7] Adding rolling statistics...")
+    if group_key:
+        # For aggregated data, compute rolling stats per h3_cell
+        rolling_cols = (
+            rolling_feature_cols or lag_cols if "lag_cols" in locals() else []
+        )
+        if not rolling_cols:
+            rolling_cols = [
+                c
+                for c in X_enriched.columns
+                if c.startswith("weather_")
+                and c
+                in [
+                    "weather_temperature",
+                    "weather_humidity",
+                    "weather_wind_speed",
+                    "weather_precipitation_amount",
+                    "weather_precipitation_probability",
+                ]
+            ]
+        for col in rolling_cols:
+            if col in X_enriched.columns:
+                for window_hours in rolling_windows:
+                    # Rolling window in hours (assuming hourly data)
+                    X_enriched[
+                        f"{col}_rolling_mean_{window_hours}h"
+                    ] = X_enriched.groupby(group_key)[col].transform(
+                        lambda x: x.rolling(window=window_hours, min_periods=1).mean()
+                    )
+                    X_enriched[
+                        f"{col}_rolling_max_{window_hours}h"
+                    ] = X_enriched.groupby(group_key)[col].transform(
+                        lambda x: x.rolling(window=window_hours, min_periods=1).max()
+                    )
+    else:
+        X_enriched = add_rolling_statistics(
+            X_enriched,
+            timestamp_col="timestamp",
+            feature_cols=rolling_feature_cols,
+            rolling_windows=rolling_windows,
+        )
 
     # Step 7: Add spatial neighbor aggregates
     logger.info("\n[Step 7/7] Adding spatial neighbor aggregates...")
@@ -507,9 +607,12 @@ def enrich_X_features(
         time_windows=time_windows,
     )
 
-    # Drop timestamp (keep it numeric features only)
-    if "timestamp" in X_enriched.columns:
+    # Keep hour_ts if it exists (needed for CV and lag features), but drop timestamp
+    if "timestamp" in X_enriched.columns and "hour_ts" in X_enriched.columns:
         X_enriched = X_enriched.drop(columns=["timestamp"])
+    elif "timestamp" in X_enriched.columns:
+        # Keep timestamp if hour_ts doesn't exist (legacy event-level data)
+        pass
 
     logger.info("\n" + "=" * 70)
     logger.info("Rich feature engineering complete!")
