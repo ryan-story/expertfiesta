@@ -168,37 +168,9 @@ def train_logistic_regression(
     DEPRECATED: Use train_linear_regression for regression tasks
     This function is kept for backward compatibility but should not be used.
     """
-    raise NotImplementedError("train_logistic_regression is deprecated. Use train_linear_regression for regression tasks.")
-
-    # Grid search
-    # NOTE: y_train is already encoded per-fold (encoder fit on train folds only)
-    start_time = time.time()
-    grid_search = GridSearchCV(
-        model,
-        param_grid,
-        cv=cv,
-        scoring=scorer,
-        n_jobs=n_jobs,
-        verbose=1,
+    raise NotImplementedError(
+        "train_logistic_regression is deprecated. Use train_linear_regression for regression tasks."
     )
-
-    grid_search.fit(X_train, y_train)
-    train_time = time.time() - start_time
-
-    best_model = grid_search.best_estimator_
-    best_params = grid_search.best_params_
-    cv_scores = {
-        "mean_test_score": grid_search.cv_results_["mean_test_score"].max(),
-        "std_test_score": grid_search.cv_results_["std_test_score"][
-            grid_search.cv_results_["mean_test_score"].argmax()
-        ],
-    }
-
-    logger.info(f"  Best params: {best_params}")
-    logger.info(f"  Best CV score: {cv_scores['mean_test_score']:.4f}")
-    logger.info(f"  Training time: {train_time:.2f}s")
-
-    return best_model, best_params, cv_scores, train_time
 
 
 def train_random_forest(
