@@ -40,14 +40,14 @@ def extract_top_features(model: Any, model_name: str, feature_names: List[str]) 
     """
     try:
         # Handle Pipeline objects (from LinearRegression/PoissonRegressor)
-        if hasattr(model, 'named_steps') and 'regressor' in model.named_steps:
-            actual_model = model.named_steps['regressor']
+        if hasattr(model, "named_steps") and "regressor" in model.named_steps:
+            actual_model = model.named_steps["regressor"]
         else:
             actual_model = model
-            
+
         if model_name in ["LinearRegression", "PoissonRegressor"]:
             # For LinearRegression/PoissonRegressor, use absolute coefficients
-            if hasattr(actual_model, 'coef_'):
+            if hasattr(actual_model, "coef_"):
                 if actual_model.coef_.ndim > 1:
                     # Multi-output: average absolute coefficients across outputs
                     importances = np.abs(actual_model.coef_).mean(axis=0)
@@ -160,30 +160,32 @@ def run_training_competition(
 
     # Extract hour_ts and h3_cell from aggregated data FIRST (before filtering)
     logger.info("\n[Step 2/6] Extracting hour_ts and h3_cell from aggregated data...")
-    
+
     if "hour_ts" in base_X.columns:
         hour_ts = pd.to_datetime(base_X["hour_ts"], utc=True)
     elif "hour_ts" in y_target.columns:
         hour_ts = pd.to_datetime(y_target["hour_ts"], utc=True)
     else:
         raise ValueError("hour_ts must be present in X or y_target for time-blocked CV")
-    
+
     if "h3_cell" in base_X.columns:
         h3_cells = base_X["h3_cell"].values
     elif "h3_cell" in y_target.columns:
         h3_cells = y_target["h3_cell"].values
     else:
         raise ValueError("h3_cell must be present in X or y_target")
-    
+
     logger.info(f"  hour_ts range: {hour_ts.min()} to {hour_ts.max()}")
     logger.info(f"  Unique h3_cells: {len(np.unique(h3_cells))}")
-    
+
     # Extract target (regression: incident_count_t_plus_1)
     if "incident_count_t_plus_1" not in y_target.columns:
-        raise ValueError("y_target must contain 'incident_count_t_plus_1' for regression")
-    
+        raise ValueError(
+            "y_target must contain 'incident_count_t_plus_1' for regression"
+        )
+
     y = y_target["incident_count_t_plus_1"].values
-    
+
     # Drop rows with NaN target (last hour per cell - excluded from training)
     valid_mask = ~pd.isna(y)
     y = y[valid_mask]
@@ -192,34 +194,42 @@ def run_training_competition(
     y_target = y_target[valid_mask].reset_index(drop=True)
     hour_ts = hour_ts[valid_mask].reset_index(drop=True)
     h3_cells = h3_cells[valid_mask]
-    
+
     logger.info(f"  After dropping NaN targets: {len(y):,} records")
-    
+
     # For hotspot metrics, create actual_counts_df from y_target (after filtering)
     # CRITICAL: incident_count_t_plus_1 represents incidents at hour_ts + 1, so hour_actual must be hour_ts + 1
-    actual_counts_df = y_target[["h3_cell", "hour_ts", "incident_count_t_plus_1"]].copy()
-    actual_counts_df["hour_actual"] = pd.to_datetime(actual_counts_df["hour_ts"], utc=True) + pd.Timedelta(hours=1)
-    actual_counts_df = actual_counts_df[["h3_cell", "hour_actual", "incident_count_t_plus_1"]].copy()
+    actual_counts_df = y_target[
+        ["h3_cell", "hour_ts", "incident_count_t_plus_1"]
+    ].copy()
+    actual_counts_df["hour_actual"] = pd.to_datetime(
+        actual_counts_df["hour_ts"], utc=True
+    ) + pd.Timedelta(hours=1)
+    actual_counts_df = actual_counts_df[
+        ["h3_cell", "hour_actual", "incident_count_t_plus_1"]
+    ].copy()
     actual_counts_df.columns = ["h3_cell", "hour_actual", "incident_count"]
-    
+
     # Reconstruct timestamps for compatibility (use hour_ts)
     timestamps = hour_ts.copy()
-    
+
     logger.info(f"  Reconstructed {len(timestamps):,} timestamps")
     logger.info(f"  Reconstructed {len(h3_cells):,} H3 cells")
 
     # Step 3: Create nested CV splits (time-blocked on hour_ts)
     logger.info("\n[Step 3/6] Creating nested time-blocked cross-validation splits...")
     from dgxb.training.cv_splitter import create_nested_cv
-    
+
     nested_cv_splits = create_nested_cv(
-        hour_ts, 
-        n_outer_folds=n_folds, 
+        hour_ts,
+        n_outer_folds=n_folds,
         n_inner_folds=3,  # Inner folds for hyperparameter tuning
-        val_window_hours=val_window_hours, 
-        gap_hours=1
+        val_window_hours=val_window_hours,
+        gap_hours=1,
     )
-    logger.info(f"  Created {len(nested_cv_splits)} nested CV folds (outer for evaluation, inner for tuning)")
+    logger.info(
+        f"  Created {len(nested_cv_splits)} nested CV folds (outer for evaluation, inner for tuning)"
+    )
 
     # Step 4: Train models for each channel
     logger.info("\n[Step 4/6] Training models...")
@@ -237,11 +247,12 @@ def run_training_competition(
         ("RandomForest", train_random_forest),
         ("XGBoost", train_xgboost),
     ]
-    
+
     # Baseline models (simple comparators)
     def train_persistence_baseline(X_train, y_train, cv_splits):
         """Persistence baseline: y_hat = incident_count_t"""
         from sklearn.base import BaseEstimator
+
         class PersistenceBaseline(BaseEstimator):
             def fit(self, X, y):
                 # Use incident_count_t as prediction
@@ -250,35 +261,49 @@ def run_training_competition(
                 else:
                     self.pred_value = 0.0
                 return self
+
             def predict(self, X):
                 if "incident_count_t" in X.columns:
                     return X["incident_count_t"].values
                 else:
                     return np.full(len(X), self.pred_value)
+
         model = PersistenceBaseline()
         model.fit(X_train, y_train)
         return model, {}, {"rmse": 0.0}, 0.0
-    
+
     def train_climatology_baseline(X_train, y_train, cv_splits):
         """Climatology baseline: y_hat = mean(incident_count | cell, hour_of_week)"""
         from sklearn.base import BaseEstimator
+
         class ClimatologyBaseline(BaseEstimator):
             def fit(self, X, y):
                 # Compute mean per (h3_cell, hour_of_week)
                 X_fit = X.copy()
-                if "h3_cell" in X_fit.columns and "hour" in X_fit.columns and "day_of_week" in X_fit.columns:
+                if (
+                    "h3_cell" in X_fit.columns
+                    and "hour" in X_fit.columns
+                    and "day_of_week" in X_fit.columns
+                ):
                     X_fit["hour_of_week"] = X_fit["day_of_week"] * 24 + X_fit["hour"]
                     y_series = pd.Series(y, index=X_fit.index)
-                    self.climatology = X_fit.groupby(["h3_cell", "hour_of_week"]).apply(
-                        lambda group: y_series.loc[group.index].mean()
-                    ).to_dict()
+                    self.climatology = (
+                        X_fit.groupby(["h3_cell", "hour_of_week"])
+                        .apply(lambda group: y_series.loc[group.index].mean())
+                        .to_dict()
+                    )
                 else:
                     self.climatology = {}
                 self.fallback = np.mean(y) if len(y) > 0 else 0.0
                 return self
+
             def predict(self, X):
                 X_pred = X.copy()
-                if "h3_cell" in X_pred.columns and "hour" in X_pred.columns and "day_of_week" in X_pred.columns:
+                if (
+                    "h3_cell" in X_pred.columns
+                    and "hour" in X_pred.columns
+                    and "day_of_week" in X_pred.columns
+                ):
                     X_pred["hour_of_week"] = X_pred["day_of_week"] * 24 + X_pred["hour"]
                     preds = []
                     for idx, row in X_pred.iterrows():
@@ -287,10 +312,11 @@ def run_training_competition(
                     return np.array(preds)
                 else:
                     return np.full(len(X), self.fallback)
+
         model = ClimatologyBaseline()
         model.fit(X_train, y_train)
         return model, {}, {"rmse": 0.0}, 0.0
-    
+
     baseline_models = [
         ("Persistence", train_persistence_baseline),
         ("Climatology", train_climatology_baseline),
@@ -346,51 +372,63 @@ def run_training_competition(
                 all_h3_test_baseline = []
                 all_hour_ts_test_baseline = []
                 all_hour_ts_pred_baseline = []
-                
+
                 # Use nested CV: inner CV for hyperparameter tuning, outer test for evaluation
-                for outer_fold_idx, (outer_train_idx, outer_test_idx, inner_cv_splits) in enumerate(nested_cv_splits):
-                    X_train_fold = X_numeric.iloc[outer_train_idx].reset_index(drop=True)
+                for outer_fold_idx, (
+                    outer_train_idx,
+                    outer_test_idx,
+                    inner_cv_splits,
+                ) in enumerate(nested_cv_splits):
+                    X_train_fold = X_numeric.iloc[outer_train_idx].reset_index(
+                        drop=True
+                    )
                     X_test_fold = X_numeric.iloc[outer_test_idx]
                     y_train_fold = y[outer_train_idx]
                     y_test_fold = y[outer_test_idx]
-                    
+
                     # Train baseline using inner CV for hyperparameter tuning
                     model, best_params, cv_scores, train_time = train_func(
                         X_train_fold, y_train_fold, inner_cv_splits
                     )
-                    
+
                     # Predict on outer test fold (never seen during hyperparameter tuning)
                     y_pred_fold = model.predict(X_test_fold)
                     y_pred_fold = np.maximum(y_pred_fold, 0.0)  # Clip to non-negative
-                    
+
                     all_y_true_baseline.extend(y_test_fold)
                     all_y_pred_baseline.extend(y_pred_fold)
                     all_h3_test_baseline.extend(h3_cells[outer_test_idx])
                     all_hour_ts_test_baseline.extend(hour_ts.iloc[outer_test_idx])
                     all_hour_ts_pred_baseline.extend(hour_ts.iloc[outer_test_idx])
-                
+
                 # Compute metrics for baseline
                 all_y_true_baseline_arr = np.array(all_y_true_baseline)
                 all_y_pred_baseline_arr = np.array(all_y_pred_baseline)
-                
+
                 regression_metrics_baseline = compute_regression_metrics(
                     all_y_true_baseline_arr, all_y_pred_baseline_arr
                 )
-                
+
                 # Build actual counts for hotspot metrics
                 hour_ts_pred_baseline_series = pd.Series(all_hour_ts_pred_baseline)
                 if not isinstance(hour_ts_pred_baseline_series, pd.DatetimeIndex):
-                    hour_ts_pred_baseline_series = pd.to_datetime(hour_ts_pred_baseline_series, utc=True)
-                
+                    hour_ts_pred_baseline_series = pd.to_datetime(
+                        hour_ts_pred_baseline_series, utc=True
+                    )
+
                 # Predictions are made at hour t, so actuals should be at hour t+1
-                hour_ts_actual_baseline_series = hour_ts_pred_baseline_series + pd.Timedelta(hours=1)
-                
+                hour_ts_actual_baseline_series = (
+                    hour_ts_pred_baseline_series + pd.Timedelta(hours=1)
+                )
+
                 # Filter actual_counts_df to actual hours (t+1)
-                actual_hours_baseline = hour_ts_actual_baseline_series.dt.floor("h").unique()
+                actual_hours_baseline = hour_ts_actual_baseline_series.dt.floor(
+                    "h"
+                ).unique()
                 actual_counts_baseline = actual_counts_df[
                     actual_counts_df["hour_actual"].isin(actual_hours_baseline)
                 ].copy()
-                
+
                 hotspot_metrics_baseline = compute_hotspot_metrics(
                     all_y_pred_baseline_arr,
                     actual_counts_baseline,
@@ -400,7 +438,7 @@ def run_training_competition(
                     k=k_hotspots,
                     h3_resolution=h3_resolution,
                 )
-                
+
                 # Create result entry for baseline
                 baseline_result = {
                     "model_name": model_name,
@@ -410,7 +448,9 @@ def run_training_competition(
                     "r2": regression_metrics_baseline["r2"],
                     "smape": regression_metrics_baseline["smape"],
                     "mape_pos": regression_metrics_baseline["mape_pos"],
-                    "hotspot_precision_at_k": hotspot_metrics_baseline["precision_at_k"],
+                    "hotspot_precision_at_k": hotspot_metrics_baseline[
+                        "precision_at_k"
+                    ],
                     "hotspot_recall_at_k": hotspot_metrics_baseline["recall_at_k"],
                     "hotspot_precision_at_k_conditional": hotspot_metrics_baseline.get(
                         "hotspot_precision_at_k_conditional", 0.0
@@ -432,17 +472,18 @@ def run_training_competition(
                     "champion": False,
                 }
                 all_results.append(baseline_result)
-                
+
                 logger.info(f"      RMSE: {regression_metrics_baseline['rmse']:.4f}")
                 logger.info(f"      MAE: {regression_metrics_baseline['mae']:.4f}")
                 logger.info(f"      R²: {regression_metrics_baseline['r2']:.4f}")
-                
+
             except Exception as e:
                 logger.error(f"  Failed to train/evaluate {model_name}: {e}")
                 import traceback
+
                 traceback.print_exc()
                 continue
-        
+
         # Train regression models
         for model_name, train_func in models:
             logger.info(f"    Model: {model_name}")
@@ -456,47 +497,61 @@ def run_training_competition(
                 all_h3_test = []
                 all_hour_ts_test = []
                 all_hour_ts_pred = []
-                
+
                 total_train_time = 0.0
 
-                for outer_fold_idx, (outer_train_idx, outer_test_idx, inner_cv_splits) in enumerate(nested_cv_splits):
-                    logger.info(f"      Outer fold {outer_fold_idx + 1}/{len(nested_cv_splits)}")
-                    
+                for outer_fold_idx, (
+                    outer_train_idx,
+                    outer_test_idx,
+                    inner_cv_splits,
+                ) in enumerate(nested_cv_splits):
+                    logger.info(
+                        f"      Outer fold {outer_fold_idx + 1}/{len(nested_cv_splits)}"
+                    )
+
                     # Train model using inner CV for hyperparameter tuning
                     # Only use outer training data
                     # Reset index so inner CV splits (0-based) work correctly
-                    X_train_outer = X_numeric.iloc[outer_train_idx].reset_index(drop=True)
+                    X_train_outer = X_numeric.iloc[outer_train_idx].reset_index(
+                        drop=True
+                    )
                     y_train_outer = y[outer_train_idx]
-                    
+
                     if model_name in ["LinearRegression", "PoissonRegressor"]:
                         model, best_params, cv_scores, train_time = train_func(  # type: ignore
                             X_train_outer, y_train_outer, inner_cv_splits
                         )
                     elif model_name == "RandomForest":
                         model, best_params, cv_scores, train_time = train_func(  # type: ignore
-                            X_train_outer, y_train_outer, inner_cv_splits, n_trials=n_trials_rf
+                            X_train_outer,
+                            y_train_outer,
+                            inner_cv_splits,
+                            n_trials=n_trials_rf,
                         )
                     elif model_name == "XGBoost":
                         model, best_params, cv_scores, train_time = train_func(  # type: ignore
-                            X_train_outer, y_train_outer, inner_cv_splits, n_trials=n_trials_xgb
+                            X_train_outer,
+                            y_train_outer,
+                            inner_cv_splits,
+                            n_trials=n_trials_xgb,
                         )
-                    
+
                     total_train_time += train_time
-                    
+
                     # Evaluate on outer test set (never seen during hyperparameter tuning)
                     X_test_outer = X_numeric.iloc[outer_test_idx]
                     y_test_outer = y[outer_test_idx]
                     hour_ts_test_outer = hour_ts.iloc[outer_test_idx]
-                    
+
                     y_pred_outer = model.predict(X_test_outer)
                     y_pred_outer = np.maximum(y_pred_outer, 0.0)  # Clip to non-negative
-                    
+
                     all_y_true.extend(y_test_outer)
                     all_y_pred.extend(y_pred_outer)
                     all_h3_test.extend(h3_cells[outer_test_idx])
                     all_hour_ts_test.extend(hour_ts_test_outer)
                     all_hour_ts_pred.extend(hour_ts_test_outer)
-                
+
                 # Use average training time across folds
                 train_time = total_train_time / len(nested_cv_splits)
 
@@ -514,10 +569,10 @@ def run_training_competition(
                 hour_ts_pred_series = pd.Series(all_hour_ts_pred)
                 if not isinstance(hour_ts_pred_series, pd.DatetimeIndex):
                     hour_ts_pred_series = pd.to_datetime(hour_ts_pred_series, utc=True)
-                
+
                 # Predictions are made at hour t, so actuals should be at hour t+1
                 hour_ts_actual_series = hour_ts_pred_series + pd.Timedelta(hours=1)
-                
+
                 # Filter actual_counts_df to actual hours (t+1)
                 actual_hours = hour_ts_actual_series.dt.floor("h").unique()
                 actual_counts = actual_counts_df[
@@ -617,7 +672,7 @@ def run_training_competition(
     # Step 5: Baseline models are already trained above
     # Historical baseline computation removed (replaced by persistence/climatology baselines)
     logger.info("\n[Step 5/7] Baseline models completed above")
-    
+
     # Step 6: Champion selection (one per channel)
     logger.info("\n[Step 6/7] Selecting champion models...")
 
@@ -634,7 +689,9 @@ def run_training_competition(
         channel_results = results_df[results_df["channel"] == channel]
         if len(channel_results) > 0:
             # Exclude baseline models from champion selection
-            channel_results_models = channel_results[~channel_results["model_name"].isin(["Persistence", "Climatology"])]
+            channel_results_models = channel_results[
+                ~channel_results["model_name"].isin(["Persistence", "Climatology"])
+            ]
             if len(channel_results_models) > 0:
                 champion_idx = channel_results_models["rmse"].idxmin()
                 results_df.loc[champion_idx, "champion"] = True
@@ -656,7 +713,9 @@ def run_training_competition(
                 logger.info(
                     f"    Staging Utility: {champion.get('staging_utility_coverage_pct', 'N/A'):.2f}%"
                 )
-                logger.info(f"    Top 5 features: {champion.get('top_5_features', 'N/A')}")
+                logger.info(
+                    f"    Top 5 features: {champion.get('top_5_features', 'N/A')}"
+                )
 
     # Step 7: Save results
     logger.info("\n[Step 7/7] Saving results...")

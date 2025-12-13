@@ -37,9 +37,13 @@ if __name__ == "__main__":
             print(f"  RMSE: {champ['rmse']:.4f}")
             print(f"  MAE: {champ['mae']:.4f}")
             print(f"  R²: {champ['r2']:.4f}")
-            print(f"  Hotspot Precision@K: {champ.get('hotspot_precision_at_k', 0.0):.4f}")
+            print(
+                f"  Hotspot Precision@K: {champ.get('hotspot_precision_at_k', 0.0):.4f}"
+            )
             print(f"  Hotspot Recall@K: {champ.get('hotspot_recall_at_k', 0.0):.4f}")
-            print(f"  Staging Utility: {champ.get('staging_utility_coverage_pct', 0.0):.1f}%")
+            print(
+                f"  Staging Utility: {champ.get('staging_utility_coverage_pct', 0.0):.1f}%"
+            )
             print(f"  Train Time: {champ['train_time_sec']:.2f}s")
             print(
                 f"  Inference Latency (p50): {champ.get('inference_latency_p50_ms', 0.0):.2f}ms"
@@ -55,9 +59,13 @@ if __name__ == "__main__":
             print(f"  RMSE: {champ['rmse']:.4f}")
             print(f"  MAE: {champ['mae']:.4f}")
             print(f"  R²: {champ['r2']:.4f}")
-            print(f"  Hotspot Precision@K: {champ.get('hotspot_precision_at_k', 0.0):.4f}")
+            print(
+                f"  Hotspot Precision@K: {champ.get('hotspot_precision_at_k', 0.0):.4f}"
+            )
             print(f"  Hotspot Recall@K: {champ.get('hotspot_recall_at_k', 0.0):.4f}")
-            print(f"  Staging Utility: {champ.get('staging_utility_coverage_pct', 0.0):.1f}%")
+            print(
+                f"  Staging Utility: {champ.get('staging_utility_coverage_pct', 0.0):.1f}%"
+            )
             print(f"  Train Time: {champ['train_time_sec']:.2f}s")
             print(
                 f"  Inference Latency (p50): {champ.get('inference_latency_p50_ms', 0.0):.2f}ms"

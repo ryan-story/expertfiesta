@@ -56,7 +56,7 @@ def compute_cell_hour_f1(
     """
     timestamps_pred = pd.to_datetime(timestamps_pred)
     timestamps_label = pd.to_datetime(timestamps_label)
-    
+
     # Use provided hazard_class_ids or default to single class
     if hazard_class_ids is None:
         hazard_class_ids = [hazard_class_id]
@@ -82,7 +82,9 @@ def compute_cell_hour_f1(
     )
     df_pred_agg = (
         df_pred.groupby(["h3_cell", "hour_pred"])
-        .agg({"hazard_proba": "max"})  # Max probability across incidents in this cell-hour
+        .agg(
+            {"hazard_proba": "max"}
+        )  # Max probability across incidents in this cell-hour
         .reset_index()
     )
     # Shift prediction hour forward by 1 hour to align with label hour (t+1)
@@ -106,9 +108,7 @@ def compute_cell_hour_f1(
 
     # Join predictions (at hour t, shifted to t+1) with labels (at hour t+1)
     # Predictions at hour t should be compared against labels at hour t+1
-    df_merged = df_pred_agg.merge(
-        df_label_agg, on=["h3_cell", "hour"], how="inner"
-    )
+    df_merged = df_pred_agg.merge(df_label_agg, on=["h3_cell", "hour"], how="inner")
 
     # Diagnostic logging
     logger = logging.getLogger(__name__)
@@ -121,21 +121,15 @@ def compute_cell_hour_f1(
         label_hour_min = df_label_agg["hour"].min()
         label_hour_max = df_label_agg["hour"].max()
 
-        logger.info(
-            "  Cell-hour F1 diagnostics:"
-        )
-        logger.info(
-            f"    Unique cell-hours evaluated: {unique_cell_hours}"
-        )
+        logger.info("  Cell-hour F1 diagnostics:")
+        logger.info(f"    Unique cell-hours evaluated: {unique_cell_hours}")
         logger.info(
             f"    Cell-hour positive rate: {cell_hour_positive_rate:.4f} ({cell_hour_positive_rate*100:.2f}%)"
         )
         logger.info(
             f"    Prediction hour range (t): {pred_hour_min} to {pred_hour_max}"
         )
-        logger.info(
-            f"    Label hour range (t+1): {label_hour_min} to {label_hour_max}"
-        )
+        logger.info(f"    Label hour range (t+1): {label_hour_min} to {label_hour_max}")
 
         # Sanity check: warn if positive rate is extremely high
         if cell_hour_positive_rate > 0.9:
@@ -463,34 +457,35 @@ def compute_regression_metrics(
 ) -> Dict[str, float]:
     """
     Compute regression metrics for count prediction
-    
+
     Args:
         y_true: True incident counts
         y_pred: Predicted incident counts
-        
+
     Returns:
         Dictionary with rmse, mae, r2, smape
     """
     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mae = mean_absolute_error(y_true, y_pred)
     r2 = r2_score(y_true, y_pred)
-    
+
     # SMAPE: Symmetric Mean Absolute Percentage Error (handles zeros safely)
     # SMAPE = 100 * mean(|y_true - y_pred| / (|y_true| + |y_pred| + epsilon))
     epsilon = 1e-8  # Small epsilon to avoid division by zero
     smape = 100 * np.mean(
         np.abs(y_true - y_pred) / (np.abs(y_true) + np.abs(y_pred) + epsilon)
     )
-    
+
     # MAPE on positive values only (optional diagnostic)
     y_pos_mask = y_true > 0
     if y_pos_mask.sum() > 0:
         mape_pos = 100 * np.mean(
-            np.abs(y_true[y_pos_mask] - y_pred[y_pos_mask]) / (y_true[y_pos_mask] + epsilon)
+            np.abs(y_true[y_pos_mask] - y_pred[y_pos_mask])
+            / (y_true[y_pos_mask] + epsilon)
         )
     else:
         mape_pos = np.nan
-    
+
     return {
         "rmse": rmse,
         "mae": mae,

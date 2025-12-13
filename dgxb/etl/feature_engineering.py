@@ -354,15 +354,15 @@ def setup_zero_shot_classifier(model_name: str = "microsoft/deberta-v3-base"):
 def classify_incident_hardcoded(descriptions: pd.Series) -> pd.DataFrame:
     """
     Classify incident descriptions using hardcoded rules (fast, no ML model needed)
-    
+
     Three categories:
     - CRASH: Crashes, collisions, vehicle accidents
     - HAZARDOUS CONDITION: Traffic hazards, obstructions, dangerous road conditions
     - OTHER: Non-critical incidents (stalled vehicles, loose livestock, etc.)
-    
+
     Args:
         descriptions: Series of incident descriptions
-        
+
     Returns:
         DataFrame with original description, predicted category, and confidence
     """
@@ -375,7 +375,7 @@ def classify_incident_hardcoded(descriptions: pd.Series) -> pd.DataFrame:
         "ped",
         "injury",
     ]
-    
+
     # HAZARDOUS CONDITION keywords
     hazardous_keywords = [
         "traffic hazard",
@@ -385,40 +385,42 @@ def classify_incident_hardcoded(descriptions: pd.Series) -> pd.DataFrame:
         "obstruct",
         "icy roadway",
     ]
-    
+
     # OTHER keywords (non-critical incidents)
     other_keywords = [
         "stalled vehicle",
         "loose livestock",
     ]
-    
+
     def classify_description(desc: str) -> tuple:
         """Classify a single description"""
         desc_lower = str(desc).lower()
-        
+
         # Check for CRASH first
         for keyword in crash_keywords:
             if keyword in desc_lower:
                 return ("CRASH", 1.0)
-        
+
         # Check for HAZARDOUS CONDITION
         for keyword in hazardous_keywords:
             if keyword in desc_lower:
                 return ("HAZARDOUS CONDITION", 1.0)
-        
+
         # Check for OTHER (non-critical)
         for keyword in other_keywords:
             if keyword in desc_lower:
                 return ("OTHER", 1.0)
-        
+
         # Default to OTHER if no match
         return ("OTHER", 0.9)
-    
-    logger.info(f"Classifying {len(descriptions)} descriptions using hardcoded rules...")
-    
+
+    logger.info(
+        f"Classifying {len(descriptions)} descriptions using hardcoded rules..."
+    )
+
     # Classify all descriptions
     results = descriptions.apply(classify_description)
-    
+
     # Extract predictions
     df_results = pd.DataFrame(
         {
@@ -427,12 +429,12 @@ def classify_incident_hardcoded(descriptions: pd.Series) -> pd.DataFrame:
             "confidence": [r[1] for r in results],
         }
     )
-    
+
     logger.info("  Classification complete")
     logger.info("  Category distribution:")
     for cat, count in df_results["predicted_category"].value_counts().items():
         logger.info(f"    {cat}: {count} ({count/len(df_results)*100:.1f}%)")
-    
+
     return df_results
 
 
@@ -446,7 +448,7 @@ def classify_incident_zero_shot(
 ) -> pd.DataFrame:
     """
     Classify incident descriptions using zero-shot classification (DEPRECATED - use classify_incident_hardcoded)
-    
+
     This function is kept for backward compatibility but is no longer used.
     """
     # Redirect to hardcoded classifier
@@ -580,19 +582,19 @@ def build_sector_hour_index(
 ) -> pd.DataFrame:
     """
     Build complete sector-hour index grid
-    
+
     For each h3_cell, create complete hourly index from min(hour_ts) to max(hour_ts).
     This ensures explicit zero rows exist (no row = no incidents).
-    
+
     Args:
         traffic_df: Event-level traffic data with h3_cell and timestamp
         h3_resolution: H3 resolution for spatial indexing
-        
+
     Returns:
         DataFrame with columns (h3_cell, hour_ts) - complete grid
     """
     logger.info("Building sector-hour index grid...")
-    
+
     # Ensure h3_cell exists
     if "h3_cell" not in traffic_df.columns:
         # Add h3_cell if not present
@@ -608,36 +610,38 @@ def build_sector_hour_index(
                     return h3.geo_to_h3(lat, lon, h3_resolution)
             except Exception:
                 return None
-        
+
         traffic_df["h3_cell"] = traffic_df.apply(get_h3_cell_safe, axis=1)
-    
+
     # Filter out None h3_cells
     traffic_valid = traffic_df[traffic_df["h3_cell"].notna()].copy()
-    
+
     if len(traffic_valid) == 0:
         logger.warning("No valid h3_cells found")
         return pd.DataFrame(columns=["h3_cell", "hour_ts"])
-    
+
     # Convert timestamp to hour_ts (timezone-aware, UTC)
     traffic_valid["timestamp"] = pd.to_datetime(traffic_valid["timestamp"], utc=True)
     traffic_valid["hour_ts"] = traffic_valid["timestamp"].dt.floor("h")
-    
+
     # Get unique h3_cells and hour range
     unique_cells = traffic_valid["h3_cell"].unique()
     min_hour = traffic_valid["hour_ts"].min()
     max_hour = traffic_valid["hour_ts"].max()
-    
+
     # Create complete grid
     hour_range = pd.date_range(start=min_hour, end=max_hour, freq="h", tz="UTC")
-    
+
     grid_data = []
     for cell in unique_cells:
         for hour_ts in hour_range:
             grid_data.append({"h3_cell": cell, "hour_ts": hour_ts})
-    
+
     grid_df = pd.DataFrame(grid_data)
-    logger.info(f"  Created grid: {len(unique_cells)} cells × {len(hour_range)} hours = {len(grid_df)} rows")
-    
+    logger.info(
+        f"  Created grid: {len(unique_cells)} cells × {len(hour_range)} hours = {len(grid_df)} rows"
+    )
+
     return grid_df
 
 
@@ -646,18 +650,19 @@ def aggregate_incidents_to_sector_hour(
 ) -> pd.DataFrame:
     """
     Aggregate incidents to sector-hour level
-    
+
     Args:
         traffic_df: Event-level traffic data
         h3_resolution: H3 resolution for spatial indexing
-        
+
     Returns:
         DataFrame with one row per (h3_cell, hour_ts) for incidents
     """
     logger.info("Aggregating incidents to sector-hour level...")
-    
+
     # Ensure h3_cell exists
     if "h3_cell" not in traffic_df.columns:
+
         def get_h3_cell_safe(row):
             try:
                 lat = float(row.get("lat", row.get("location_lat", 0)))
@@ -670,28 +675,28 @@ def aggregate_incidents_to_sector_hour(
                     return h3.geo_to_h3(lat, lon, h3_resolution)
             except Exception:
                 return None
-        
+
         traffic_df = traffic_df.copy()
         traffic_df["h3_cell"] = traffic_df.apply(get_h3_cell_safe, axis=1)
-    
+
     # Filter out None h3_cells
     traffic_valid = traffic_df[traffic_df["h3_cell"].notna()].copy()
-    
+
     if len(traffic_valid) == 0:
         logger.warning("No valid h3_cells found")
         return pd.DataFrame(columns=["h3_cell", "hour_ts", "incident_count"])
-    
+
     # Convert timestamp to hour_ts (timezone-aware, UTC)
     traffic_valid["timestamp"] = pd.to_datetime(traffic_valid["timestamp"], utc=True)
     traffic_valid["hour_ts"] = traffic_valid["timestamp"].dt.floor("h")
-    
+
     # Extract time features (same for all rows in group)
     traffic_valid["hour"] = traffic_valid["hour_ts"].dt.hour
     traffic_valid["day_of_week"] = traffic_valid["hour_ts"].dt.dayofweek
     traffic_valid["day_of_month"] = traffic_valid["hour_ts"].dt.day
     traffic_valid["month"] = traffic_valid["hour_ts"].dt.month
     traffic_valid["is_weekend"] = (traffic_valid["day_of_week"] >= 5).astype(int)
-    
+
     # Group by (h3_cell, hour_ts) and aggregate
     agg_dict = {
         "incident_id": "count",  # Count incidents
@@ -701,13 +706,13 @@ def aggregate_incidents_to_sector_hour(
         "month": "first",
         "is_weekend": "first",
     }
-    
+
     # Add optional counts for agency/status if they exist (avoid mode)
     if "agency" in traffic_valid.columns:
         agg_dict["agency"] = "nunique"  # Count unique agencies
     if "status" in traffic_valid.columns:
         agg_dict["status"] = "nunique"  # Count unique statuses
-    
+
     inc_agg = traffic_valid.groupby(["h3_cell", "hour_ts"]).agg(agg_dict).reset_index()
     inc_agg.columns = [
         "h3_cell",
@@ -719,16 +724,16 @@ def aggregate_incidents_to_sector_hour(
         "month",
         "is_weekend",
     ] + ([col for col in ["agency", "status"] if col in traffic_valid.columns])
-    
+
     # Rename optional columns
     if "agency" in inc_agg.columns:
         inc_agg = inc_agg.rename(columns={"agency": "n_unique_agency"})
     if "status" in inc_agg.columns:
         inc_agg = inc_agg.rename(columns={"status": "n_unique_status"})
-    
+
     logger.info(f"  Aggregated to {len(inc_agg)} sector-hour rows")
     logger.info(f"  Total incidents: {inc_agg['incident_count'].sum()}")
-    
+
     return inc_agg
 
 
@@ -737,18 +742,19 @@ def aggregate_weather_to_sector_hour(
 ) -> pd.DataFrame:
     """
     Aggregate weather to sector-hour level
-    
+
     Args:
         weather_df: Event-level weather data with h3_cell assigned
         h3_resolution: H3 resolution for spatial indexing
-        
+
     Returns:
         DataFrame with one row per (h3_cell, hour_ts) for weather
     """
     logger.info("Aggregating weather to sector-hour level...")
-    
+
     # Ensure h3_cell exists (weather should already have it from fuzzy merge, but check)
     if "h3_cell" not in weather_df.columns:
+
         def get_h3_cell_safe(row):
             try:
                 lat = float(row.get("lat", 0))
@@ -761,21 +767,21 @@ def aggregate_weather_to_sector_hour(
                     return h3.geo_to_h3(lat, lon, h3_resolution)
             except Exception:
                 return None
-        
+
         weather_df = weather_df.copy()
         weather_df["h3_cell"] = weather_df.apply(get_h3_cell_safe, axis=1)
-    
+
     # Filter out None h3_cells
     weather_valid = weather_df[weather_df["h3_cell"].notna()].copy()
-    
+
     if len(weather_valid) == 0:
         logger.warning("No valid h3_cells found in weather data")
         return pd.DataFrame()
-    
+
     # Convert timestamp to hour_ts (timezone-aware, UTC)
     weather_valid["timestamp"] = pd.to_datetime(weather_valid["timestamp"], utc=True)
     weather_valid["hour_ts"] = weather_valid["timestamp"].dt.floor("h")
-    
+
     # Weather aggregation: median for continuous, max for precipitation
     weather_cols = {
         "temperature": "median",
@@ -787,28 +793,30 @@ def aggregate_weather_to_sector_hour(
         "precipitation_probability": "max",
         "is_daytime": "first",  # Binary, use first
     }
-    
+
     # Only aggregate columns that exist
     agg_dict = {
-        col: func
-        for col, func in weather_cols.items()
-        if col in weather_valid.columns
+        col: func for col, func in weather_cols.items() if col in weather_valid.columns
     }
-    
+
     if "weather_code" in weather_valid.columns:
         agg_dict["weather_code"] = "first"  # Use first weather code
-    
+
     if "data_source" in weather_valid.columns:
         agg_dict["data_source"] = "first"
-    
+
     wx_agg = weather_valid.groupby(["h3_cell", "hour_ts"]).agg(agg_dict).reset_index()
-    
+
     # Rename columns to have weather_ prefix
-    rename_dict = {col: f"weather_{col}" for col in wx_agg.columns if col not in ["h3_cell", "hour_ts"]}
+    rename_dict = {
+        col: f"weather_{col}"
+        for col in wx_agg.columns
+        if col not in ["h3_cell", "hour_ts"]
+    }
     wx_agg = wx_agg.rename(columns=rename_dict)
-    
+
     logger.info(f"  Aggregated to {len(wx_agg)} sector-hour rows")
-    
+
     return wx_agg
 
 
@@ -820,16 +828,16 @@ def join_and_impute_sector_hour(
 ) -> pd.DataFrame:
     """
     Join incident and weather sector-hour data, with weather imputation fallback
-    
+
     DEPRECATED: This function is no longer used. Weather imputation is now done
     inline in merge_and_save_X_features() for better performance.
-    
+
     Args:
         inc_sector_hour: Aggregated incident data
         wx_sector_hour: Aggregated weather data
         h3_resolution: H3 resolution for spatial operations
         k_ring_size: H3 k-ring size for neighbor fallback
-        
+
     Returns:
         Combined sector-hour DataFrame with imputed weather
     """
@@ -846,36 +854,38 @@ def make_regression_target(
 ) -> pd.DataFrame:
     """
     Create regression target: incident_count_t_plus_1
-    
+
     Args:
         sector_hour_base: Aggregated sector-hour data
-        
+
     Returns:
         DataFrame with incident_count_t and incident_count_t_plus_1
     """
     logger.info("Creating regression target...")
-    
+
     # Sort by h3_cell and hour_ts
     sector_hour_sorted = sector_hour_base.sort_values(["h3_cell", "hour_ts"]).copy()
-    
+
     # Create incident_count_t (current hour)
     sector_hour_sorted["incident_count_t"] = sector_hour_sorted["incident_count"]
-    
+
     # Create incident_count_t_plus_1 via shift(-1) per cell
-    sector_hour_sorted["incident_count_t_plus_1"] = (
-        sector_hour_sorted.groupby("h3_cell")["incident_count"].shift(-1)
-    )
-    
+    sector_hour_sorted["incident_count_t_plus_1"] = sector_hour_sorted.groupby(
+        "h3_cell"
+    )["incident_count"].shift(-1)
+
     # Drop rows where incident_count_t_plus_1 is null (last hour per cell)
     # These are kept for inference but excluded from training
     y_target = sector_hour_sorted[
         ["h3_cell", "hour_ts", "incident_count_t", "incident_count_t_plus_1"]
     ].copy()
-    
+
     n_dropped = y_target["incident_count_t_plus_1"].isna().sum()
     logger.info(f"  Created target: {len(y_target)} rows")
-    logger.info(f"  Dropped {n_dropped} rows (last hour per cell) - excluded from training")
-    
+    logger.info(
+        f"  Dropped {n_dropped} rows (last hour per cell) - excluded from training"
+    )
+
     return y_target
 
 
@@ -943,12 +953,14 @@ def merge_and_save_X_features(
     gold_path.mkdir(parents=True, exist_ok=True)
     merged_events_path = gold_path / "merged_events.parquet"
     merged_df.to_parquet(merged_events_path, index=False)
-    logger.info(f"  Saved merged events to {merged_events_path} (for debugging/traceability)")
+    logger.info(
+        f"  Saved merged events to {merged_events_path} (for debugging/traceability)"
+    )
 
     # Step 3: Aggregate incidents to sector-hour (only where incidents exist)
     logger.info("\n[Step 3/6] Aggregating incidents to sector-hour...")
     inc_sector_hour = aggregate_incidents_to_sector_hour(traffic_df, h3_resolution)
-    
+
     # Fill zeros for incident_count where missing (but don't create full grid)
     # This keeps data size reasonable - only cells/hours with data or weather
     if "incident_count" in inc_sector_hour.columns:
@@ -958,6 +970,7 @@ def merge_and_save_X_features(
     logger.info("\n[Step 5/6] Aggregating weather to sector-hour...")
     # Assign h3_cell to weather data if not already present
     if "h3_cell" not in weather_df.columns:
+
         def get_h3_cell_for_weather(row):
             try:
                 lat = float(row.get("lat", 0))
@@ -970,10 +983,10 @@ def merge_and_save_X_features(
                     return h3.geo_to_h3(lat, lon, h3_resolution)
             except Exception:
                 return None
-        
+
         weather_df = weather_df.copy()
         weather_df["h3_cell"] = weather_df.apply(get_h3_cell_for_weather, axis=1)
-    
+
     wx_sector_hour = aggregate_weather_to_sector_hour(weather_df, h3_resolution)
 
     # Step 6: Join and impute sector-hour data
@@ -982,27 +995,37 @@ def merge_and_save_X_features(
     sector_hour_base = inc_sector_hour.merge(
         wx_sector_hour, on=["h3_cell", "hour_ts"], how="outer"
     )
-    
+
     # Fill zeros for incident_count where missing (from weather-only rows)
     if "incident_count" in sector_hour_base.columns:
-        sector_hour_base["incident_count"] = sector_hour_base["incident_count"].fillna(0)
-    
+        sector_hour_base["incident_count"] = sector_hour_base["incident_count"].fillna(
+            0
+        )
+
     # Fill time features from hour_ts where missing
     if "hour_ts" in sector_hour_base.columns:
         sector_hour_base["hour"] = sector_hour_base["hour_ts"].dt.hour
         sector_hour_base["day_of_week"] = sector_hour_base["hour_ts"].dt.dayofweek
         sector_hour_base["day_of_month"] = sector_hour_base["hour_ts"].dt.day
         sector_hour_base["month"] = sector_hour_base["hour_ts"].dt.month
-        sector_hour_base["is_weekend"] = (sector_hour_base["day_of_week"] >= 5).astype(int)
-    
+        sector_hour_base["is_weekend"] = (sector_hour_base["day_of_week"] >= 5).astype(
+            int
+        )
+
     # Apply weather imputation (simplified - only for rows that need it)
-    weather_cols = [col for col in sector_hour_base.columns if col.startswith("weather_")]
+    weather_cols = [
+        col for col in sector_hour_base.columns if col.startswith("weather_")
+    ]
     if weather_cols:
         missing_weather = sector_hour_base[weather_cols].isna().any(axis=1)
         if missing_weather.sum() > 0:
-            logger.info(f"  Found {missing_weather.sum()} sector-hours with missing weather")
-            logger.info("  Applying city-wide fallback (skipping slow neighbor lookup)...")
-            
+            logger.info(
+                f"  Found {missing_weather.sum()} sector-hours with missing weather"
+            )
+            logger.info(
+                "  Applying city-wide fallback (skipping slow neighbor lookup)..."
+            )
+
             # Skip neighbor fallback for performance - just use city-wide weather
             for hour_ts in sector_hour_base[missing_weather]["hour_ts"].unique():
                 city_weather = wx_sector_hour[wx_sector_hour["hour_ts"] == hour_ts]
@@ -1011,12 +1034,16 @@ def merge_and_save_X_features(
                     for col in weather_cols:
                         if pd.api.types.is_numeric_dtype(city_weather[col]):
                             city_median = city_weather[col].median()
-                            sector_hour_base.loc[mask & sector_hour_base[col].isna(), col] = city_median
+                            sector_hour_base.loc[
+                                mask & sector_hour_base[col].isna(), col
+                            ] = city_median
                         else:
                             # For non-numeric, use mode
                             city_mode = city_weather[col].mode()
                             if len(city_mode) > 0:
-                                sector_hour_base.loc[mask & sector_hour_base[col].isna(), col] = city_mode.iloc[0]
+                                sector_hour_base.loc[
+                                    mask & sector_hour_base[col].isna(), col
+                                ] = city_mode.iloc[0]
 
     # Save sector-hour base (canonical modeling table)
     sector_hour_base_path = gold_path / "sector_hour_base.parquet"
@@ -1030,44 +1057,70 @@ def merge_and_save_X_features(
     # Prepare features from sector_hour_base (drop target columns, encode, etc.)
     # Keep hour_ts for CV and lag features
     X_features = sector_hour_base.copy()
-    
+
     # Drop target columns if they exist
     target_cols = ["incident_count", "incident_count_t", "incident_count_t_plus_1"]
-    X_features = X_features.drop(columns=[col for col in target_cols if col in X_features.columns])
-    
+    X_features = X_features.drop(
+        columns=[col for col in target_cols if col in X_features.columns]
+    )
+
     # Add cyclical encoding for temporal features
     if "hour" in X_features.columns:
         X_features["hour_sin"] = np.sin(2 * np.pi * X_features["hour"] / 24)
         X_features["hour_cos"] = np.cos(2 * np.pi * X_features["hour"] / 24)
     if "day_of_week" in X_features.columns:
-        X_features["day_of_week_sin"] = np.sin(2 * np.pi * X_features["day_of_week"] / 7)
-        X_features["day_of_week_cos"] = np.cos(2 * np.pi * X_features["day_of_week"] / 7)
+        X_features["day_of_week_sin"] = np.sin(
+            2 * np.pi * X_features["day_of_week"] / 7
+        )
+        X_features["day_of_week_cos"] = np.cos(
+            2 * np.pi * X_features["day_of_week"] / 7
+        )
     if "month" in X_features.columns:
         X_features["month_sin"] = np.sin(2 * np.pi * X_features["month"] / 12)
         X_features["month_cos"] = np.cos(2 * np.pi * X_features["month"] / 12)
-    
+
     # Transform wind direction if present
     if "weather_wind_direction" in X_features.columns:
         wind_dir = pd.to_numeric(X_features["weather_wind_direction"], errors="coerce")
         X_features["wind_direction_sin"] = np.sin(np.deg2rad(wind_dir))
         X_features["wind_direction_cos"] = np.cos(np.deg2rad(wind_dir))
         X_features = X_features.drop(columns=["weather_wind_direction"])
-    
+
     # Encode categorical weather features
     if "weather_weather_code" in X_features.columns:
-        dummies = pd.get_dummies(X_features["weather_weather_code"], prefix="weather_weather_code", drop_first=True)
-        X_features = pd.concat([X_features.drop(columns=["weather_weather_code"]), dummies], axis=1)
-    
+        dummies = pd.get_dummies(
+            X_features["weather_weather_code"],
+            prefix="weather_weather_code",
+            drop_first=True,
+        )
+        X_features = pd.concat(
+            [X_features.drop(columns=["weather_weather_code"]), dummies], axis=1
+        )
+
     if "weather_data_source" in X_features.columns:
-        dummies = pd.get_dummies(X_features["weather_data_source"], prefix="weather_data_source", drop_first=True)
-        X_features = pd.concat([X_features.drop(columns=["weather_data_source"]), dummies], axis=1)
-    
+        dummies = pd.get_dummies(
+            X_features["weather_data_source"],
+            prefix="weather_data_source",
+            drop_first=True,
+        )
+        X_features = pd.concat(
+            [X_features.drop(columns=["weather_data_source"]), dummies], axis=1
+        )
+
     # Convert binary features
     if "weather_is_daytime" in X_features.columns:
-        X_features["weather_is_daytime"] = X_features["weather_is_daytime"].fillna(0).astype(int)
-    
+        X_features["weather_is_daytime"] = (
+            X_features["weather_is_daytime"].fillna(0).astype(int)
+        )
+
     # Handle missing weather data indicator
-    weather_cols = [c for c in X_features.columns if c.startswith("weather_") and c not in ["weather_data_source"] and not c.startswith("weather_data_source_")]
+    weather_cols = [
+        c
+        for c in X_features.columns
+        if c.startswith("weather_")
+        and c not in ["weather_data_source"]
+        and not c.startswith("weather_data_source_")
+    ]
     if weather_cols:
         X_features["has_weather_data"] = X_features[weather_cols[0]].notna().astype(int)
 
@@ -1133,30 +1186,30 @@ def prepare_y_target_regression(
 ) -> pd.DataFrame:
     """
     Y Pipeline (Regression): Create regression target from sector-hour base data
-    
+
     Creates incident_count_t_plus_1 as target (predicting next hour's incidents).
-    
+
     Args:
         sector_hour_base_path: Path to sector_hour_base.parquet
         gold_output_dir: Output directory for gold layer
-        
+
     Returns:
         y_target DataFrame with incident_count_t_plus_1 and incident_count_t
     """
     logger.info("=" * 70)
     logger.info("Y PIPELINE: Regression Target Preparation")
     logger.info("=" * 70)
-    
+
     # Step 1: Load sector-hour base data
     logger.info("\n[Step 1/2] Loading sector-hour base data...")
     logger.info(f"  Source: {sector_hour_base_path}")
     sector_hour_base = pd.read_parquet(sector_hour_base_path)
     logger.info(f"    Loaded {len(sector_hour_base):,} sector-hour records")
-    
+
     # Step 2: Create regression target
     logger.info("\n[Step 2/2] Creating regression target...")
     y_target = make_regression_target(sector_hour_base)
-    
+
     # Save y target
     gold_path = Path(gold_output_dir)
     gold_path.mkdir(parents=True, exist_ok=True)
@@ -1166,7 +1219,7 @@ def prepare_y_target_regression(
     logger.info(f"  Total records: {len(y_target):,}")
     logger.info("  Target: incident_count_t_plus_1 (regression)")
     logger.info("  Note: Rows with null incident_count_t_plus_1 excluded from training")
-    
+
     # Save Y metadata
     metadata = {
         "timestamp": pd.Timestamp.now().isoformat(),
@@ -1176,18 +1229,18 @@ def prepare_y_target_regression(
         "target_variable": "incident_count_t_plus_1",
         "pipeline": "y_target_regression",
     }
-    
+
     metadata_path = gold_path / "y_metadata.json"
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
     logger.info(f"✓ Saved Y metadata to {metadata_path}")
-    
+
     logger.info("\n" + "=" * 70)
     logger.info("Y Pipeline complete!")
     logger.info("=" * 70)
     logger.info("Note: y_target.parquet is for training only")
     logger.info("=" * 70)
-    
+
     return y_target
 
 

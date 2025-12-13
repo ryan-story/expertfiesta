@@ -47,11 +47,11 @@ def train_linear_regression(
 
     # Create model with StandardScaler pipeline
     from sklearn.pipeline import Pipeline
-    pipeline = Pipeline([
-        ("scaler", StandardScaler()),
-        ("regressor", LinearRegression())
-    ])
-    
+
+    pipeline = Pipeline(
+        [("scaler", StandardScaler()), ("regressor", LinearRegression())]
+    )
+
     # Update param grid for pipeline
     param_grid_pipeline = {
         "regressor__fit_intercept": param_grid["fit_intercept"],
@@ -117,11 +117,11 @@ def train_poisson_regression(
 
     # Create model with StandardScaler pipeline
     from sklearn.pipeline import Pipeline
-    pipeline = Pipeline([
-        ("scaler", StandardScaler()),
-        ("regressor", PoissonRegressor())
-    ])
-    
+
+    pipeline = Pipeline(
+        [("scaler", StandardScaler()), ("regressor", PoissonRegressor())]
+    )
+
     # Update param grid for pipeline
     param_grid_pipeline = {
         "regressor__alpha": param_grid["alpha"],

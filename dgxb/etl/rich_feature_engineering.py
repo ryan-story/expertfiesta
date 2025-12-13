@@ -116,7 +116,9 @@ def add_extended_temporal_features(
         naive_timestamps = df[timestamp_col].dt.tz_localize(None)
         year_start_naive = naive_timestamps.dt.to_period("Y").dt.start_time
         # Convert to datetime and add timezone
-        year_start = pd.Series(pd.to_datetime(year_start_naive), index=df.index).dt.tz_localize(tz)
+        year_start = pd.Series(
+            pd.to_datetime(year_start_naive), index=df.index
+        ).dt.tz_localize(tz)
     else:
         year_start = df[timestamp_col].dt.to_period("Y").dt.start_time
     df["days_since_year_start"] = (df[timestamp_col] - year_start).dt.days
@@ -450,7 +452,7 @@ def enrich_X_features(
 
     # Step 2: Ensure timestamp/hour_ts exists in X
     logger.info("\n[Step 2/6] Ensuring timestamp exists in X...")
-    
+
     # Check if hour_ts exists (aggregated data) or if we need to load from merged_intermediate
     if "hour_ts" in X_base.columns:
         # Aggregated data - use hour_ts as timestamp
@@ -465,13 +467,15 @@ def enrich_X_features(
         # Need to load from merged_intermediate (legacy event-level data)
         logger.info(f"  Loading timestamp from {merged_intermediate_path}")
         merged_df = pd.read_parquet(merged_intermediate_path)
-        
+
         # Merge timestamp back into X
         # Try to merge on incident_id first, then fall back to index alignment
         if "incident_id" in merged_df.columns:
             if "incident_id" in X_base.columns:
                 # Merge on incident_id
-                timestamp_map = merged_df.set_index("incident_id")["timestamp"].to_dict()
+                timestamp_map = merged_df.set_index("incident_id")[
+                    "timestamp"
+                ].to_dict()
                 X_base["timestamp"] = X_base["incident_id"].map(timestamp_map)
                 logger.info("    Merged timestamp using incident_id")
             else:
@@ -491,7 +495,7 @@ def enrich_X_features(
             else:
                 logger.warning("Cannot merge timestamp - data length mismatch")
                 X_base["timestamp"] = None
-        
+
         logger.info("    Merged timestamp into X features")
 
     # Step 3: Ensure proper grouping key exists
@@ -504,8 +508,10 @@ def enrich_X_features(
         logger.info("  Using incident_id as grouping key (event-level data)")
     else:
         group_key = None
-        logger.warning("  No grouping key found - lag/rolling features may be incorrect")
-    
+        logger.warning(
+            "  No grouping key found - lag/rolling features may be incorrect"
+        )
+
     # Step 4: Add time binning features
     logger.info("\n[Step 4/7] Adding time binning features...")
     X_enriched = add_time_binning_features(X_base.copy(), timestamp_col="timestamp")
@@ -518,19 +524,29 @@ def enrich_X_features(
     logger.info("\n[Step 6/7] Adding lag features...")
     if group_key:
         # For aggregated data, compute lags per h3_cell
-        X_enriched = X_enriched.sort_values([group_key, "timestamp"]).reset_index(drop=True)
+        X_enriched = X_enriched.sort_values([group_key, "timestamp"]).reset_index(
+            drop=True
+        )
         # Group by h3_cell and compute lags within each group
         lag_cols = lag_feature_cols or [
-            c for c in X_enriched.columns
-            if c.startswith("weather_") and c in [
-                "weather_temperature", "weather_humidity", "weather_wind_speed",
-                "weather_precipitation_amount", "weather_precipitation_probability"
+            c
+            for c in X_enriched.columns
+            if c.startswith("weather_")
+            and c
+            in [
+                "weather_temperature",
+                "weather_humidity",
+                "weather_wind_speed",
+                "weather_precipitation_amount",
+                "weather_precipitation_probability",
             ]
         ]
         for col in lag_cols:
             if col in X_enriched.columns:
                 for lag_hours in lag_windows:
-                    X_enriched[f"{col}_lag_{lag_hours}h"] = X_enriched.groupby(group_key)[col].shift(lag_hours)
+                    X_enriched[f"{col}_lag_{lag_hours}h"] = X_enriched.groupby(
+                        group_key
+                    )[col].shift(lag_hours)
     else:
         X_enriched = add_lag_features(
             X_enriched,
@@ -543,28 +559,36 @@ def enrich_X_features(
     logger.info("\n[Step 7/7] Adding rolling statistics...")
     if group_key:
         # For aggregated data, compute rolling stats per h3_cell
-        rolling_cols = rolling_feature_cols or lag_cols if 'lag_cols' in locals() else []
+        rolling_cols = (
+            rolling_feature_cols or lag_cols if "lag_cols" in locals() else []
+        )
         if not rolling_cols:
             rolling_cols = [
-                c for c in X_enriched.columns
-                if c.startswith("weather_") and c in [
-                    "weather_temperature", "weather_humidity", "weather_wind_speed",
-                    "weather_precipitation_amount", "weather_precipitation_probability"
+                c
+                for c in X_enriched.columns
+                if c.startswith("weather_")
+                and c
+                in [
+                    "weather_temperature",
+                    "weather_humidity",
+                    "weather_wind_speed",
+                    "weather_precipitation_amount",
+                    "weather_precipitation_probability",
                 ]
             ]
         for col in rolling_cols:
             if col in X_enriched.columns:
                 for window_hours in rolling_windows:
                     # Rolling window in hours (assuming hourly data)
-                    X_enriched[f"{col}_rolling_mean_{window_hours}h"] = (
-                        X_enriched.groupby(group_key)[col].transform(
-                            lambda x: x.rolling(window=window_hours, min_periods=1).mean()
-                        )
+                    X_enriched[
+                        f"{col}_rolling_mean_{window_hours}h"
+                    ] = X_enriched.groupby(group_key)[col].transform(
+                        lambda x: x.rolling(window=window_hours, min_periods=1).mean()
                     )
-                    X_enriched[f"{col}_rolling_max_{window_hours}h"] = (
-                        X_enriched.groupby(group_key)[col].transform(
-                            lambda x: x.rolling(window=window_hours, min_periods=1).max()
-                        )
+                    X_enriched[
+                        f"{col}_rolling_max_{window_hours}h"
+                    ] = X_enriched.groupby(group_key)[col].transform(
+                        lambda x: x.rolling(window=window_hours, min_periods=1).max()
                     )
     else:
         X_enriched = add_rolling_statistics(

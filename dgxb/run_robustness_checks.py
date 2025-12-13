@@ -7,8 +7,7 @@ import logging
 from dgxb.validation.robustness_checks import run_all_robustness_checks
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 if __name__ == "__main__":
@@ -16,12 +15,11 @@ if __name__ == "__main__":
     print("ROBUSTNESS VALIDATION CHECKS")
     print("=" * 80)
     print()
-    
+
     results = run_all_robustness_checks()
-    
+
     print()
     print("=" * 80)
     print("✓ Robustness checks complete!")
     print("  Results saved to: results/robustness_checks.json")
     print("=" * 80)
-
