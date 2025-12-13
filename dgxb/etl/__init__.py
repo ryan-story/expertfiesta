@@ -30,6 +30,15 @@ from .feature_engineering import (
     classify_incident_zero_shot,
 )
 
+from .rich_feature_engineering import (
+    enrich_X_features,
+    add_time_binning_features,
+    add_extended_temporal_features,
+    add_lag_features,
+    add_rolling_statistics,
+    add_spatial_neighbor_aggregates,
+)
+
 __all__ = [
     "OpenMeteoWeatherFetcher",
     "fetch_and_save_weather",
@@ -48,4 +57,10 @@ __all__ = [
     "prepare_and_save_y_target",
     "prepare_ml_features",
     "classify_incident_zero_shot",
+    "enrich_X_features",
+    "add_time_binning_features",
+    "add_extended_temporal_features",
+    "add_lag_features",
+    "add_rolling_statistics",
+    "add_spatial_neighbor_aggregates",
 ]
