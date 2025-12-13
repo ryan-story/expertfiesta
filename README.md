@@ -4,285 +4,270 @@
 
 **Data Product First**: Define a standardized data product structure (like an API contract) that any data source can conform to. Once data conforms to this structure, it automatically flows through the pipeline.
 
-**Dual-Pipeline Benchmarking**: Build parallel CPU and GPU pipelines with identical logic, enabling fair comparison of performance (time, throughput, quality).
+**Hotspot Agent Watcher**: Build a system that learns the "Rhythm of the City" to predict traffic incident hotspots based on time/day and visualizes where units should be stationed. The system divides Austin into sectors (H3 cells) and assigns a "Risk Score" to each sector for every hour of the day.
 
-**Model Competition**: Both pipelines run multiple model candidates and select a champion based on objective metrics.
+## Current Implementation Status
+
+### ✅ Completed: Sector-Hour Regression Pipeline
+
+**Architecture**: The system has been refactored from event-level classification to (sector, hour) regression:
+
+- **Gold Layer**: Aggregated to (h3_cell, hour_ts) level with explicit zero rows
+- **Target**: `incident_count_t_plus_1` (predicting next hour's incident count per sector)
+- **Features**: Weather aggregates, temporal features, spatial context, lag/rolling features
+- **Models**: LinearRegression, PoissonRegressor, RandomForestRegressor, XGBRegressor
+- **Metrics**: RMSE, MAE, R², SMAPE, MAPE (positive only), Hotspot Precision@K/Recall@K
+- **CV Splitting**: Time-blocked splits on `hour_ts` (not individual rows)
+
+### ✅ Implemented Components
+
+#### Data Layers (Bronze → Silver → Gold → Rich Gold)
+
+1. **Bronze Layer** (`bronze-traffic/`, `bronze-weather/`)
+   - Raw ingested data (parquet files per day)
+   - Traffic incidents and weather observations
+
+2. **Silver Layer** (`silver-cpu-traffic/`, `silver-cpu-weather/`)
+   - Cleaned and standardized data
+   - Basic transformations applied
+
+3. **Gold Layer** (`gold-cpu-traffic/`)
+   - **Aggregated to sector-hour level**: `sector_hour_base.parquet`
+   - **Event-level traceability**: `merged_events.parquet`
+   - **Feature matrix**: `X_features.parquet` (with `hour_ts` preserved)
+   - **Target variable**: `y_target.parquet` (incident_count_t_plus_1)
+   - Primary key: `(h3_cell, hour_ts)` where `hour_ts` is timezone-aware UTC timestamp
+
+4. **Rich Gold Layer** (`rich-gold-cpu-traffic/`)
+   - Enriched features with lags and rolling statistics
+   - Computed per `h3_cell` group on aggregated data
+   - Preserves `hour_ts` for CV and lag feature generation
+
+#### ETL Pipeline (`dgxb/etl/`)
+
+- **`feature_engineering.py`**:
+  - `build_sector_hour_index()`: Creates complete sector-hour grid with explicit zeros
+  - `aggregate_incidents_to_sector_hour()`: Aggregates incidents to (h3_cell, hour_ts)
+  - `aggregate_weather_to_sector_hour()`: Aggregates weather separately
+  - `join_and_impute_sector_hour()`: Joins with neighbor/city-wide fallback
+  - `make_regression_target()`: Creates `incident_count_t_plus_1` target
+  - `merge_and_save_X_features()`: Orchestrates aggregation and feature engineering
+  - `prepare_y_target_regression()`: Y pipeline for regression target
+
+- **`rich_feature_engineering.py`**:
+  - `enrich_X_features()`: Adds lags, rolling stats, spatial aggregates
+  - Works with aggregated data using `hour_ts` and `h3_cell` grouping
+
+- **`traffic_fetcher.py`**, **`weather_fetcher.py`**, **`silver_processor.py`**: Data ingestion and cleaning
+
+#### Training Pipeline (`dgxb/training/`)
+
+- **`pipeline.py`**:
+  - `run_training_competition()`: Main orchestrator
+  - Loads aggregated data, performs time-blocked CV, trains models, computes metrics
+  - Champion selection based on RMSE (minimize)
+
+- **`model_competition.py`**:
+  - `train_linear_regression()`: LinearRegression with StandardScaler
+  - `train_poisson_regression()`: PoissonRegressor (count-native)
+  - `train_random_forest()`: RandomForestRegressor
+  - `train_xgboost()`: XGBRegressor (reg:squarederror or count:poisson)
+  - Baseline models: Persistence (y_hat = incident_count_t), Climatology (y_hat = mean per cell, hour_of_week)
+
+- **`metrics_tracker.py`**:
+  - `compute_regression_metrics()`: RMSE, MAE, R², SMAPE, MAPE (positive only)
+  - `compute_hotspot_metrics()`: Precision@K, Recall@K (per hour, then averaged)
+  - `measure_inference_latency()`: P50, P95 latency metrics
+
+- **`cv_splitter.py`**:
+  - `create_rolling_origin_cv()`: Time-blocked splits on `hour_ts`
+  - Test set: contiguous time window (e.g., last 24h)
+  - Train set: hours strictly before test window (with optional gap)
+
+- **`leakage_audit.py`**: Feature timestamp validation (for classification, skipped for regression)
+
+- **`baseline_comparison.py`**: Historical baseline metrics (legacy, replaced by baseline models)
+
+#### Entry Points
+
+- **`run_X_pipeline.py`**: Runs X feature engineering pipeline
+- **`run_Y_pipeline.py`**: Runs Y target preparation (regression)
+- **`run_rich_features.py`**: Runs rich feature engineering
+- **`run_training.py`**: Runs model training competition
+
+### 🔄 In Progress / Known Issues
+
+1. **Weather Imputation Performance**: The neighbor/city-wide fallback for missing weather can be slow for large grids. May need optimization.
+
+2. **Baseline Model Evaluation**: Baseline models (Persistence, Climatology) are implemented but need full integration with evaluation loop.
+
+3. **Pipeline Execution**: End-to-end pipeline execution needs testing after recent refactoring.
+
+### 📋 Remaining Work
+
+1. **End-to-End Testing**: 
+   - Verify X pipeline completes successfully
+   - Verify Y pipeline creates correct targets
+   - Verify rich features work with aggregated data
+   - Verify training pipeline runs end-to-end
+
+2. **Performance Optimization**:
+   - Optimize weather imputation for large grids
+   - Consider vectorized operations for neighbor lookups
+
+3. **Documentation**:
+   - Add docstrings to all new functions
+   - Document aggregation strategy and design decisions
+   - Create usage examples
+
+4. **GPU Pipeline** (Future):
+   - Implement GPU equivalents using cuDF, cuML
+   - Benchmark CPU vs GPU performance
+
+5. **Serving Layer** (Future):
+   - Hotspot visualization
+   - Real-time prediction API
+   - Staging recommendations
 
 ## Architecture Overview
 
-### 1. Data Product Design (ETL Contract)
-
-**Standardized Schema Contract**:
-
-- Input data must conform to a defined schema
-- Output artifacts follow a standardized structure
-- Enables plug-and-play data sources
-
-**Data Product Structure**:
+### Data Flow
 
 ```
-data_product/
-├── raw/                    # Raw ingested data
-│   ├── incidents/
-│   ├── weather/
-│   └── geography/
-├── base/                   # Base feature artifacts
-│   ├── features_base.parquet
-│   └── metadata.json
-├── enriched/               # Enriched feature artifacts
-│   ├── features_enriched.parquet
-│   └── metadata.json
-└── registry/               # Dataset registry
-    ├── schema_hash.json
-    ├── time_range.json
-    └── row_counts.json
+Bronze (Raw) → Silver (Cleaned) → Gold (Aggregated) → Rich Gold (Enriched) → Training → Results
 ```
 
-### 2. Dual-Pipeline Architecture
+### Key Design Decisions
 
-**CPU Pipeline** (Standard Stack):
+1. **Sector-Hour Aggregation**:
+   - Primary key: `(h3_cell, hour_ts)` with timezone-aware timestamps
+   - Explicit zero rows: Complete grid ensures "no row = no incidents" is explicit
+   - Weather aggregated separately, then joined (prevents leakage)
 
-- pandas/polars for ETL
-- h3-py for spatial indexing
-- scikit-learn for models
-- XGBoost CPU (tree_method="hist")
-- OR-Tools for optimization (optional)
+2. **Target Construction**:
+   - `incident_count_t_plus_1` = `incident_count.groupby(h3_cell).shift(-1)`
+   - Rows with null target (last hour per cell) excluded from training
 
-**GPU Pipeline** (NVIDIA Stack):
+3. **Time-Blocked CV**:
+   - Splits on `hour_ts`, not individual rows
+   - All cells in test hours evaluated simultaneously
+   - Optional gap between train and test to prevent rolling feature leakage
 
-- cuDF for ETL
-- cuSpatial for spatial indexing
-- cuML for models
-- XGBoost GPU (tree_method="gpu_hist")
-- cuOpt for optimization (optional)
+4. **Feature Engineering**:
+   - Weather: median (continuous), max (precipitation), mode (categorical)
+   - Avoid "mode" for agency/status (use counts/shares instead)
+   - Lag/rolling features computed per `h3_cell` group
 
-**Both pipelines**:
+5. **Metrics**:
+   - Primary: RMSE, MAE (overall)
+   - Secondary: R², SMAPE (handles zeros safely)
+   - Hotspot: Precision@K, Recall@K (per hour, then averaged)
 
-- Same transformations
-- Same feature definitions
-- Same train/test splits
-- Same model families/hyperparams
-- Produce identical artifact structure
-
-### 3. Benchmark Matrix (2×2)
-
-| Stack | Base Features | Enriched Features |
-
-|-------|--------------|-------------------|
-
-| CPU   | CPU + Base   | CPU + Enriched    |
-
-| GPU   | GPU + Base   | GPU + Enriched    |
-
-**Four Comparable Runs**:
-
-1. CPU + Base (~50-100 features)
-2. GPU + Base (~50-100 features)
-3. CPU + Enriched (~1000-5000 features)
-4. GPU + Enriched (~1000-5000 features)
-
-### 4. Feature Engineering Strategy
-
-**Base Features**:
-
-- H3 indexing
-- Time binning
-- Basic temporal (hour, day_of_week, month)
-- Optional: simple weather join
-
-**Enriched Features**:
-
-- All base features
-- Lags (multiple windows)
-- Rolling stats (mean, std, min, max)
-- Spatial neighbor aggregates
-- Extended temporal features
-- Weather features (comprehensive)
-
-### 5. Model Competition Framework
-
-**CPU Candidates**:
-
-- sklearn LogisticRegression
-- sklearn RandomForest
-- XGBoost CPU (tree_method="hist")
-
-**GPU Candidates**:
-
-- cuML LogisticRegression
-- cuML RandomForest
-- XGBoost GPU (tree_method="gpu_hist")
-
-**Champion Selection**:
-
-- Primary: Maximize Precision@K
-- Tie-break: Minimize inference latency
-- Deterministic rule for reproducibility
-
-## Implementation Structure
+## File Structure
 
 ```
 dgxb/
-├── data_product/           # Data product design & contracts
-│   ├── __init__.py
-│   ├── schema.py          # Standardized schema definitions
-│   ├── registry.py         # Dataset registry & metadata
-│   ├── validator.py        # Schema validation
-│   └── converter.py       # Convert raw data to data product format
-├── etl/                    # ETL pipelines
-│   ├── __init__.py
-│   ├── cpu_ingest.py       # CPU ingestion (pandas/polars)
-│   ├── gpu_ingest.py       # GPU ingestion (cuDF)
-│   ├── cpu_feature_builder.py  # CPU feature engineering
-│   ├── gpu_feature_builder.py  # GPU feature engineering
-│   └── splitter.py         # Time-aware CV splitter
-├── models/                 # Model competition
-│   ├── __init__.py
-│   ├── cpu_competition.py  # CPU model competition orchestrator
-│   ├── gpu_competition.py  # GPU model competition orchestrator
-│   ├── evaluator.py       # Metrics & KPI store
-│   └── champion_selector.py
-├── serving/                # Serving layer
-│   ├── __init__.py
-│   ├── cpu_serving.py      # CPU serving (sklearn, XGBoost CPU)
-│   ├── gpu_serving.py      # GPU serving (cuML, FIL for XGBoost)
-│   └── fil_engine.py      # FIL engine for XGBoost GPU models
-├── optimization/           # Optimization layer
-│   ├── __init__.py
-│   ├── cpu_staging.py     # CPU staging (heuristic/OR-Tools)
-│   └── gpu_staging.py     # GPU staging (heuristic/cuOpt)
-├── benchmarks/             # Benchmarking harness
-│   ├── __init__.py
-│   ├── benchmark_runner.py  # Orchestrates 4 runs
-│   ├── metrics_collector.py # Collects all metrics
-│   └── report_generator.py  # Generates comparison reports
-├── visualization/          # Dashboard
-│   ├── __init__.py
-│   └── dashboard.py        # Streamlit dashboard
-└── pipeline.py             # Main orchestration
+├── etl/
+│   ├── feature_engineering.py      # Aggregation & base features
+│   ├── rich_feature_engineering.py # Lag/rolling/spatial features
+│   ├── traffic_fetcher.py          # Traffic data ingestion
+│   ├── weather_fetcher.py          # Weather data ingestion
+│   └── silver_processor.py         # Silver layer processing
+├── training/
+│   ├── pipeline.py                 # Main training orchestrator
+│   ├── model_competition.py        # Model training functions
+│   ├── metrics_tracker.py         # Regression & hotspot metrics
+│   ├── cv_splitter.py             # Time-blocked CV splits
+│   ├── leakage_audit.py           # Feature validation (legacy)
+│   └── baseline_comparison.py     # Historical baseline (legacy)
+├── run_X_pipeline.py              # X feature engineering entry point
+├── run_Y_pipeline.py              # Y target preparation entry point
+├── run_rich_features.py           # Rich features entry point
+└── run_training.py                # Training entry point
 ```
 
-## Key Components
+## Usage
 
-### Data Product Schema (`data_product/schema.py`)
+### 1. Run X Pipeline (Feature Engineering)
 
-- Defines input/output contracts
-- Schema validation
-- Metadata tracking
+```bash
+python -m dgxb.run_X_pipeline
+# or
+python dgxb/run_X_pipeline.py
+```
 
-### Feature Builders (`etl/cpu_feature_builder.py`, `etl/gpu_feature_builder.py`)
+Creates:
+- `gold-cpu-traffic/merged_events.parquet` (event-level, for traceability)
+- `gold-cpu-traffic/sector_hour_base.parquet` (aggregated, canonical)
+- `gold-cpu-traffic/X_features.parquet` (features ready for ML)
 
-- Base feature generation
-- Enriched feature generation
-- Identical logic, different backends
+### 2. Run Y Pipeline (Target Preparation)
 
-### Model Competition (`models/cpu_competition.py`, `models/gpu_competition.py`)
+```bash
+python -m dgxb.run_Y_pipeline
+# or
+python dgxb/run_Y_pipeline.py
+```
 
-- Train multiple candidates
-- Cross-validation per model
-- Metric collection
-- Champion selection
+Creates:
+- `gold-cpu-traffic/y_target.parquet` (incident_count_t_plus_1)
 
-### Serving Layer (`serving/`)
+### 3. Run Rich Features
 
-- CPU: sklearn models, XGBoost CPU
-- GPU: cuML models, FIL for XGBoost
-- Hotspot generation
-- Staging recommendations
+```bash
+python -m dgxb.run_rich_features
+# or
+python dgxb/run_rich_features.py
+```
 
-### Benchmark Harness (`benchmarks/`)
+Creates:
+- `rich-gold-cpu-traffic/X_features.parquet` (enriched features)
 
-- Orchestrates 4 runs
-- Collects: latency, throughput, quality
-- Generates comparison reports
-- Cold-start vs warm-start timing
+### 4. Run Training
 
-## Benchmark Metrics
+```bash
+python -m dgxb.run_training
+# or
+python dgxb/run_training.py
+```
 
-### A) Pipeline Latency (End-to-End)
+Creates:
+- `results/cpu_training_results.csv` (all model results)
+- Champion selection based on RMSE
 
-- Ingest + cleaning time
-- Feature build time
-- Train time
-- Inference latency
-- Staging recommendation generation
+## Results
 
-### B) Throughput and Scale
+Results are saved to `results/` directory:
 
-- Rows processed/sec for feature engineering
-- Max dataset size feasible
-- Time-to-first-dashboard-update
+- `cpu_training_results.csv`: All model results with metrics
+- Columns include: `rmse`, `mae`, `r2`, `smape`, `hotspot_precision_at_k`, `hotspot_recall_at_k`, etc.
 
-### C) Model Quality
+## Key Metrics
 
-- Precision@K hotspots
-- Recall@K
-- Staging utility proxy (incidents "covered")
+### Regression Metrics
+- **RMSE**: Root Mean Squared Error (primary)
+- **MAE**: Mean Absolute Error (primary)
+- **R²**: Coefficient of determination
+- **SMAPE**: Symmetric Mean Absolute Percentage Error (handles zeros)
+- **MAPE (positive only)**: Mean Absolute Percentage Error on non-zero targets
 
-## Artifact Contract
+### Hotspot Metrics
+- **Precision@K**: Of top-K predicted hotspots, how many are in top-K actual?
+- **Recall@K**: Of top-K actual hotspots, how many are in top-K predicted?
+- **Conditional Precision@K**: Same, but only for hours with ≥1 incident
+- **Staging Utility**: % of cell-hours with incidents that are in predicted top-K
 
-**Standardized Outputs** (both pipelines):
+## Future Enhancements
 
-- `features_base.parquet`
-- `features_enriched.parquet`
-- `cv_folds.json` (time splits)
-- `model_results.parquet` (all candidates × folds)
-- `champion_model.*` (pickle/joblib or XGBoost JSON)
-- `serving_bundle/` (includes FIL engine if XGBoost wins)
-- `inference_snapshot.parquet` (next-hour predictions + staging recs)
+1. **GPU Pipeline**: Implement cuDF/cuML equivalents for performance comparison
+2. **Serving Layer**: Real-time prediction API and visualization
+3. **Advanced Features**: More sophisticated spatial-temporal features
+4. **Model Improvements**: Ensemble methods, deep learning models
+5. **Production Deployment**: Containerization, API endpoints, monitoring
 
-## Critical Fairness Rules
+## Notes
 
-1. **Same Transformations**: Identical feature definitions, window sizes
-2. **Same Splits**: Identical train/test split strategy
-3. **Same Models**: Equivalent algorithms (CPU vs GPU versions)
-4. **Same Hyperparams**: Identical hyperparameter grids
-5. **Report Both**: Cold-start and warm-start timing
-
-## Implementation Phases
-
-### Phase 1: Data Product Design
-
-- Define schema contracts
-- Build data product validator
-- Create converter utilities
-
-### Phase 2: ETL Pipelines
-
-- CPU ingestion & feature builder
-- GPU ingestion & feature builder
-- Time-aware CV splitter
-- Ensure identical transformations
-
-### Phase 3: Model Competition
-
-- CPU model competition orchestrator
-- GPU model competition orchestrator
-- Evaluator & KPI store
-- Champion selector
-
-### Phase 4: Serving Layer
-
-- CPU serving module
-- GPU serving module (cuML + FIL)
-- Hotspot & staging engine
-
-### Phase 5: Benchmarking
-
-- Benchmark runner (4 runs)
-- Metrics collector
-- Report generator
-
-### Phase 6: Visualization
-
-- Streamlit dashboard
-- Comparison visualizations
-- Performance reports
-
-## Success Criteria
-
-1. **Data Product**: Any data source conforming to schema runs through pipeline automatically
-2. **Fair Comparison**: CPU vs GPU pipelines produce identical artifacts (except performance)
-3. **Measurable Wins**: Clear deltas in time, throughput, quality
-4. **Reproducibility**: Deterministic results, same splits, same models
-5. **Scalability**: Demonstrate GPU advantages at scale
+- The system uses H3 resolution 9 (cell size ~0.50km) for spatial indexing
+- All timestamps are timezone-aware (UTC preferred)
+- The pipeline is designed for in-memory processing (pandas-based)
+- For larger datasets, consider chunking or distributed processing

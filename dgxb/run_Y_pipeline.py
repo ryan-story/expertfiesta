@@ -13,17 +13,15 @@ import logging
 # Add parent directory to path so we can import dgxb
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dgxb.etl.feature_engineering import prepare_and_save_y_target
+from dgxb.etl.feature_engineering import prepare_y_target_regression
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 if __name__ == "__main__":
-    y_target = prepare_and_save_y_target(
-        merged_data_path="gold-cpu-traffic/merged_intermediate.parquet",
-        zero_shot_model="microsoft/deberta-v3-base",
-        use_cached_classifications=True,
+    y_target = prepare_y_target_regression(
+        sector_hour_base_path="gold-cpu-traffic/sector_hour_base.parquet",
     )
 
     print("\n✓ Y Pipeline complete!")

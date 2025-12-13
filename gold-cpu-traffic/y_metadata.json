@@ -1,0 +1,27 @@
+{
+  "timestamp": "2025-12-13T11:57:46.960533",
+  "row_count": 3956,
+  "target_columns": [
+    "description",
+    "incident_category",
+    "incident_category_confidence",
+    "incident_id"
+  ],
+  "feature_engineering": {
+    "zero_shot_model": "microsoft/deberta-v3-base",
+    "incident_categories": [
+      "CRASH",
+      "HAZARDOUS CONDITION",
+      "OTHER"
+    ],
+    "target_column": "description",
+    "target_column_raw": "incident_category",
+    "note": "Encoding done per-fold in training to avoid leakage"
+  },
+  "target_distribution": {
+    "CRASH": 2300,
+    "HAZARDOUS CONDITION": 1378,
+    "OTHER": 278
+  },
+  "pipeline": "y_target"
+}
