@@ -59,6 +59,14 @@ bronze-traffic/*.parquet
 bronze-traffic/*.csv
 bronze-traffic/*.json
 !bronze-traffic/metadata.json
+silver-cpu-traffic/*.parquet
+silver-cpu-traffic/*.csv
+silver-cpu-traffic/*.json
+!silver-cpu-traffic/metadata.json
+silver-cpu-weather/*.parquet
+silver-cpu-weather/*.csv
+silver-cpu-weather/*.json
+!silver-cpu-weather/metadata.json
 data_product/
 *.pkl
 *.joblib
