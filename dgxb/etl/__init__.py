@@ -13,6 +13,13 @@ from .traffic_fetcher import (
     fetch_and_save_traffic,
     save_traffic_bronze,
 )
+from .silver_processor import (
+    process_bronze_to_silver_traffic,
+    process_bronze_to_silver_weather,
+    load_bronze_parquets,
+    clean_traffic_data,
+    clean_weather_data,
+)
 
 __all__ = [
     "NWSWeatherFetcher",
@@ -21,4 +28,9 @@ __all__ = [
     "AustinTrafficFetcher",
     "fetch_and_save_traffic",
     "save_traffic_bronze",
+    "process_bronze_to_silver_traffic",
+    "process_bronze_to_silver_weather",
+    "load_bronze_parquets",
+    "clean_traffic_data",
+    "clean_weather_data",
 ]
