@@ -43,7 +43,7 @@ class OpenMeteoWeatherFetcher:
         try:
             response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
-            return response.json()
+            return response.json()  # type: ignore[no-any-return]
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {url}, error: {e}")
             raise
@@ -65,15 +65,17 @@ class OpenMeteoWeatherFetcher:
             "start_date": start_str,
             "end_date": end_str,
             "hourly": "temperature_2m,relative_humidity_2m,dewpoint_2m,"
-                     "wind_speed_10m,wind_direction_10m,precipitation,"
-                     "precipitation_probability,weather_code",
+            "wind_speed_10m,wind_direction_10m,precipitation,"
+            "precipitation_probability,weather_code",
             "timezone": "auto",  # Auto-detect timezone
         }
 
         try:
             data = self._make_request(self.ARCHIVE_URL, params)
         except Exception as e:
-            logger.warning(f"Failed to fetch historical weather for ({lat}, {lon}): {e}")
+            logger.warning(
+                f"Failed to fetch historical weather for ({lat}, {lon}): {e}"
+            )
             return pd.DataFrame()
 
         # Parse Open-Meteo response
@@ -92,7 +94,7 @@ class OpenMeteoWeatherFetcher:
             try:
                 # Parse timestamp (Open-Meteo returns ISO format)
                 timestamp = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                
+
                 # Only include data within requested range
                 if timestamp < start_date or timestamp > end_date:
                     continue
@@ -108,7 +110,9 @@ class OpenMeteoWeatherFetcher:
                         "wind_speed": hourly.get("wind_speed_10m", [None])[i],
                         "wind_direction": hourly.get("wind_direction_10m", [None])[i],
                         "precipitation_amount": hourly.get("precipitation", [None])[i],
-                        "precipitation_probability": hourly.get("precipitation_probability", [None])[i],
+                        "precipitation_probability": hourly.get(
+                            "precipitation_probability", [None]
+                        )[i],
                         "weather_code": hourly.get("weather_code", [None])[i],
                         "data_source": "historical",  # Mark as historical
                     }
@@ -140,8 +144,8 @@ class OpenMeteoWeatherFetcher:
             "start_date": start_str,
             "end_date": end_str,
             "hourly": "temperature_2m,relative_humidity_2m,dewpoint_2m,"
-                     "wind_speed_10m,wind_direction_10m,precipitation,"
-                     "precipitation_probability,weather_code",
+            "wind_speed_10m,wind_direction_10m,precipitation,"
+            "precipitation_probability,weather_code",
             "timezone": "auto",  # Auto-detect timezone
         }
 
@@ -167,7 +171,7 @@ class OpenMeteoWeatherFetcher:
             try:
                 # Parse timestamp (Open-Meteo returns ISO format)
                 timestamp = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
-                
+
                 # Only include data within requested range
                 if timestamp < start_date or timestamp > end_date:
                     continue
@@ -183,7 +187,9 @@ class OpenMeteoWeatherFetcher:
                         "wind_speed": hourly.get("wind_speed_10m", [None])[i],
                         "wind_direction": hourly.get("wind_direction_10m", [None])[i],
                         "precipitation_amount": hourly.get("precipitation", [None])[i],
-                        "precipitation_probability": hourly.get("precipitation_probability", [None])[i],
+                        "precipitation_probability": hourly.get(
+                            "precipitation_probability", [None]
+                        )[i],
                         "weather_code": hourly.get("weather_code", [None])[i],
                         "data_source": "forecast",  # Mark as forecast
                     }
@@ -209,7 +215,7 @@ class OpenMeteoWeatherFetcher:
         """
         Fetch both historical and forecast weather data for multiple locations
         Returns combined DataFrame with data_source column indicating source
-        
+
         Args:
             locations: List of (lat, lon) tuples
             start_date: Start date for data range
@@ -349,8 +355,10 @@ def fetch_and_save_weather(
     logger.info(
         f"Fetching weather data for {len(locations)} locations from {start_date} to {end_date}"
     )
-    logger.info(f"Include historical: {include_historical}, Include forecast: {include_forecast}")
-    
+    logger.info(
+        f"Include historical: {include_historical}, Include forecast: {include_forecast}"
+    )
+
     weather_df = fetcher.fetch_weather_for_locations(
         locations,
         start_date,
@@ -365,7 +373,7 @@ def fetch_and_save_weather(
 
     save_weather_bronze(weather_df, output_dir)
     logger.info(f"Weather data saved to {output_dir}")
-    
+
     # Print summary
     if "data_source" in weather_df.columns:
         source_counts = weather_df["data_source"].value_counts()

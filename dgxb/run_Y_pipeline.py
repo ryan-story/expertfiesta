@@ -16,8 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dgxb.etl.feature_engineering import prepare_and_save_y_target
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 if __name__ == "__main__":
@@ -26,8 +25,7 @@ if __name__ == "__main__":
         zero_shot_model="microsoft/deberta-v3-base",
         use_cached_classifications=True,
     )
-    
+
     print("\n✓ Y Pipeline complete!")
     print(f"  y (target): {y_target.shape[0]:,} records")
     print("  Check ./gold-cpu-traffic/y_target.parquet")
-

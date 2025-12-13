@@ -16,8 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dgxb.etl.feature_engineering import merge_and_save_to_gold
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 if __name__ == "__main__":
@@ -28,18 +27,19 @@ if __name__ == "__main__":
     print("  python dgxb/run_Y_pipeline.py (slow, zero-shot classification)")
     print("=" * 70)
     print()
-    
+
     X_features, y_target = merge_and_save_to_gold(
-        h3_resolution=9,          # ~0.5km cells
-        k_ring_size=1,            # Include immediate neighbors
-        max_spatial_km=50,        # Max 50km spatial distance
-        max_time_hours=1,         # Max 1 hour time difference
-        spatial_weight=1.0,       # Weight for spatial distance
-        temporal_weight=0.5       # Weight for temporal distance
+        h3_resolution=9,  # ~0.5km cells
+        k_ring_size=1,  # Include immediate neighbors
+        max_spatial_km=50,  # Max 50km spatial distance
+        max_time_hours=1,  # Max 1 hour time difference
+        spatial_weight=1.0,  # Weight for spatial distance
+        temporal_weight=0.5,  # Weight for temporal distance
     )
-    
+
     print("\n✓ Combined pipeline complete!")
-    print(f"  X (features): {X_features.shape[0]:,} records, {X_features.shape[1]} features")
+    print(
+        f"  X (features): {X_features.shape[0]:,} records, {X_features.shape[1]} features"
+    )
     print(f"  y (target): {y_target.shape[0]:,} records")
     print("  Check ./gold-cpu-traffic/ directory for results.")
-
