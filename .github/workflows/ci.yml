@@ -22,6 +22,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff black mypy
           pip install -r dgxb/requirements.txt
+          pip install types-requests
       
       - name: Run ruff
         run: |
