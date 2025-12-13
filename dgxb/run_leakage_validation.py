@@ -9,7 +9,6 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dgxb.training.pipeline import run_training_competition
 from dgxb.training.cv_splitter import create_rolling_origin_cv
 from dgxb.training.leakage_validation import (
     single_feature_smoke_test,
@@ -83,7 +82,7 @@ def main():
     logger.info("\n" + "=" * 70)
     logger.info("TEST 1: BASE FEATURE AUDIT")
     logger.info("=" * 70)
-    feature_list = print_base_feature_list(
+    print_base_feature_list(
         base_X_numeric, output_file="results/base_features_list.csv"
     )
     

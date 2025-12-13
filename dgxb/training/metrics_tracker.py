@@ -122,7 +122,7 @@ def compute_cell_hour_f1(
         label_hour_max = df_label_agg["hour"].max()
 
         logger.info(
-            f"  Cell-hour F1 diagnostics:"
+            "  Cell-hour F1 diagnostics:"
         )
         logger.info(
             f"    Unique cell-hours evaluated: {unique_cell_hours}"
@@ -140,7 +140,7 @@ def compute_cell_hour_f1(
         # Sanity check: warn if positive rate is extremely high
         if cell_hour_positive_rate > 0.9:
             logger.warning(
-                f"    ⚠️  Cell-hour positive rate > 0.9 - this may indicate label definition issue"
+                "    ⚠️  Cell-hour positive rate > 0.9 - this may indicate label definition issue"
             )
 
         # Sanity check: verify temporal alignment (prediction hours should be before label hours)

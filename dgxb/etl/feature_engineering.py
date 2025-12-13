@@ -1164,8 +1164,8 @@ def prepare_y_target_regression(
     y_target.to_parquet(y_file, index=False)
     logger.info(f"\n✓ Saved target variable (y) to {y_file}")
     logger.info(f"  Total records: {len(y_target):,}")
-    logger.info(f"  Target: incident_count_t_plus_1 (regression)")
-    logger.info(f"  Note: Rows with null incident_count_t_plus_1 excluded from training")
+    logger.info("  Target: incident_count_t_plus_1 (regression)")
+    logger.info("  Note: Rows with null incident_count_t_plus_1 excluded from training")
     
     # Save Y metadata
     metadata = {
@@ -1230,11 +1230,6 @@ def prepare_and_save_y_target(
     # Step 2: Zero-shot classification for target
     logger.info("\n[Step 2/3] Zero-shot classification for target variable...")
     gold_path = Path(gold_output_dir)
-    cache_path = (
-        gold_path / "zero_shot_classifications.parquet"
-        if use_cached_classifications
-        else None
-    )
 
     try:
         # Use hardcoded rule-based classification (fast, no ML model needed)

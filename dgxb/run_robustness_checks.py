@@ -22,6 +22,6 @@ if __name__ == "__main__":
     print()
     print("=" * 80)
     print("✓ Robustness checks complete!")
-    print(f"  Results saved to: results/robustness_checks.json")
+    print("  Results saved to: results/robustness_checks.json")
     print("=" * 80)
 
