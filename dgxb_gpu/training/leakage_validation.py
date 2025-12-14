@@ -448,7 +448,10 @@ def permutation_test_gpu(
 
         # Use our helper function for F1 score
         from dgxb_gpu.training.metrics_tracker import _compute_f1_score
-        return _compute_f1_score(np.asarray(all_true), np.asarray(all_pred), zero_division=0)
+
+        return _compute_f1_score(
+            np.asarray(all_true), np.asarray(all_pred), zero_division=0
+        )
 
     logger.info("Training on original labels...")
     original_f1 = _score_with_labels(None)

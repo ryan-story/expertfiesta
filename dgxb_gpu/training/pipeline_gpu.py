@@ -16,10 +16,11 @@ import numpy as np
 from pathlib import Path
 import logging
 import time
-from typing import List, Any, Dict, Tuple
+from typing import List, Any, Dict
 
 try:
     import joblib
+
     HAS_JOBLIB = True
 except ImportError:
     HAS_JOBLIB = False
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 # ----------------------------
 # Helper utilities
 # ----------------------------
+
 
 def _numeric_only(df: pd.DataFrame) -> pd.DataFrame:
     """Keep numeric + bool columns; cast bool -> int."""
@@ -86,7 +88,7 @@ def _measure_inference_latency(
     times = times[n_warmup:]
     p50 = float(np.percentile(times, 50))
     p95 = float(np.percentile(times, 95))
-    
+
     return {
         "inference_latency_cold_start_ms": cold_ms,
         "inference_latency_p50_ms": p50,
@@ -98,6 +100,7 @@ def _measure_inference_latency(
 # Baselines
 # ----------------------------
 
+
 def _baseline_persistence_predict(X: pd.DataFrame) -> np.ndarray:
     """Persistence baseline: y_hat = incident_count_t if present else 0."""
     if "incident_count_t" in X.columns:
@@ -105,7 +108,9 @@ def _baseline_persistence_predict(X: pd.DataFrame) -> np.ndarray:
     return np.zeros(len(X), dtype=np.float32)
 
 
-def _fit_climatology_mapping(X_train: pd.DataFrame, y_train: np.ndarray) -> pd.DataFrame:
+def _fit_climatology_mapping(
+    X_train: pd.DataFrame, y_train: np.ndarray
+) -> pd.DataFrame:
     """Build mapping: mean(y) per (h3_cell, hour_of_week)."""
     required = {"h3_cell", "hour", "day_of_week"}
     if not required.issubset(set(X_train.columns)):
@@ -119,7 +124,9 @@ def _fit_climatology_mapping(X_train: pd.DataFrame, y_train: np.ndarray) -> pd.D
     return mapping
 
 
-def _predict_climatology(X_test: pd.DataFrame, mapping: pd.DataFrame, fallback: float) -> np.ndarray:
+def _predict_climatology(
+    X_test: pd.DataFrame, mapping: pd.DataFrame, fallback: float
+) -> np.ndarray:
     required = {"h3_cell", "hour", "day_of_week"}
     if not required.issubset(set(X_test.columns)) or len(mapping) == 0:
         return np.full(len(X_test), fallback, dtype=np.float32)
@@ -133,6 +140,7 @@ def _predict_climatology(X_test: pd.DataFrame, mapping: pd.DataFrame, fallback: 
 # ----------------------------
 # Main orchestrator
 # ----------------------------
+
 
 def run_training_competition_gpu(
     base_x_path: str = "gold-gpu-traffic/X_features.parquet",
@@ -149,7 +157,7 @@ def run_training_competition_gpu(
 ) -> pd.DataFrame:
     """
     Run GPU training competition pipeline.
-    
+
     Uses XGBoost with GPU acceleration + scikit-learn for other models.
     """
     logger.info("=" * 70)
@@ -158,6 +166,7 @@ def run_training_competition_gpu(
 
     # Check GPU via XGBoost
     from .model_competition import _has_cuda_gpu
+
     if _has_cuda_gpu():
         logger.info("🚀 GPU detected - XGBoost will use CUDA")
     else:
@@ -227,10 +236,16 @@ def run_training_competition_gpu(
 
     # ---- Step 4: Build actual_counts_df for hotspot metrics ----
     logger.info("\n[Step 4/7] Building actual_counts_df for hotspot metrics...")
-    actual_counts_df = y_target[["h3_cell", "hour_ts", "incident_count_t_plus_1"]].copy()
+    actual_counts_df = y_target[
+        ["h3_cell", "hour_ts", "incident_count_t_plus_1"]
+    ].copy()
     actual_counts_df["hour_ts"] = pd.to_datetime(actual_counts_df["hour_ts"], utc=True)
-    actual_counts_df["hour_actual"] = actual_counts_df["hour_ts"] + pd.Timedelta(hours=1)
-    actual_counts_df = actual_counts_df.rename(columns={"incident_count_t_plus_1": "incident_count"})
+    actual_counts_df["hour_actual"] = actual_counts_df["hour_ts"] + pd.Timedelta(
+        hours=1
+    )
+    actual_counts_df = actual_counts_df.rename(
+        columns={"incident_count_t_plus_1": "incident_count"}
+    )
     actual_counts_df = actual_counts_df[["h3_cell", "hour_actual", "incident_count"]]
 
     # ---- Step 5: Train per channel ----
@@ -300,30 +315,37 @@ def run_training_competition_gpu(
 
             hour_ts_actual = hour_ts_pred + pd.Timedelta(hours=1)
             actual_hours = hour_ts_actual.dt.floor("h").unique()
-            actual_counts = actual_counts_df[actual_counts_df["hour_actual"].isin(actual_hours)].copy()
+            actual_counts = actual_counts_df[
+                actual_counts_df["hour_actual"].isin(actual_hours)
+            ].copy()
 
             hotspot = compute_hotspot_metrics(
-                y_pred_np, actual_counts, h3_np,
-                hour_ts_pred, hour_ts_actual,
+                y_pred_np,
+                actual_counts,
+                h3_np,
+                hour_ts_pred,
+                hour_ts_actual,
                 k=k_hotspots,
             )
 
-            all_results.append({
-                "model_name": baseline_name,
-                "channel": channel_name,
-                "rmse": reg["rmse"],
-                "mae": reg["mae"],
-                "r2": reg["r2"],
-                "smape": reg["smape"],
-                "mape_pos": reg["mape_pos"],
-                "hotspot_precision_at_k": hotspot["precision_at_k"],
-                "hotspot_recall_at_k": hotspot["recall_at_k"],
-                "train_time_sec": 0.0,
-                "inference_latency_p50_ms": 0.0,
-                "inference_latency_p95_ms": 0.0,
-                "top_5_features": f"{baseline_name}_baseline",
-                "champion": False,
-            })
+            all_results.append(
+                {
+                    "model_name": baseline_name,
+                    "channel": channel_name,
+                    "rmse": reg["rmse"],
+                    "mae": reg["mae"],
+                    "r2": reg["r2"],
+                    "smape": reg["smape"],
+                    "mape_pos": reg["mape_pos"],
+                    "hotspot_precision_at_k": hotspot["precision_at_k"],
+                    "hotspot_recall_at_k": hotspot["recall_at_k"],
+                    "train_time_sec": 0.0,
+                    "inference_latency_p50_ms": 0.0,
+                    "inference_latency_p95_ms": 0.0,
+                    "top_5_features": f"{baseline_name}_baseline",
+                    "champion": False,
+                }
+            )
 
             logger.info(f"      RMSE: {reg['rmse']:.4f}, MAE: {reg['mae']:.4f}")
 
@@ -338,8 +360,14 @@ def run_training_competition_gpu(
             total_train_time = 0.0
             best_params = {}
 
-            for outer_fold_idx, (outer_train_idx, outer_test_idx, inner_cv_splits) in enumerate(nested_cv_splits):
-                logger.info(f"      Outer fold {outer_fold_idx+1}/{len(nested_cv_splits)}")
+            for outer_fold_idx, (
+                outer_train_idx,
+                outer_test_idx,
+                inner_cv_splits,
+            ) in enumerate(nested_cv_splits):
+                logger.info(
+                    f"      Outer fold {outer_fold_idx+1}/{len(nested_cv_splits)}"
+                )
 
                 X_train_outer = X_np[outer_train_idx]
                 y_train_outer = y[outer_train_idx]
@@ -389,11 +417,16 @@ def run_training_competition_gpu(
 
             hour_ts_actual = hour_ts_pred + pd.Timedelta(hours=1)
             actual_hours = hour_ts_actual.dt.floor("h").unique()
-            actual_counts = actual_counts_df[actual_counts_df["hour_actual"].isin(actual_hours)].copy()
+            actual_counts = actual_counts_df[
+                actual_counts_df["hour_actual"].isin(actual_hours)
+            ].copy()
 
             hotspot = compute_hotspot_metrics(
-                y_pred_np, actual_counts, h3_np,
-                hour_ts_pred, hour_ts_actual,
+                y_pred_np,
+                actual_counts,
+                h3_np,
+                hour_ts_pred,
+                hour_ts_actual,
                 k=k_hotspots,
             )
 
@@ -404,25 +437,34 @@ def run_training_competition_gpu(
                 else:
                     latency = _measure_inference_latency(model, X_np)
             except Exception:
-                latency = {"inference_latency_p50_ms": 0.0, "inference_latency_p95_ms": 0.0}
+                latency = {
+                    "inference_latency_p50_ms": 0.0,
+                    "inference_latency_p95_ms": 0.0,
+                }
 
-            all_results.append({
-                "model_name": model_name,
-                "channel": channel_name,
-                "rmse": reg["rmse"],
-                "mae": reg["mae"],
-                "r2": reg["r2"],
-                "smape": reg["smape"],
-                "mape_pos": reg["mape_pos"],
-                "hotspot_precision_at_k": hotspot["precision_at_k"],
-                "hotspot_recall_at_k": hotspot["recall_at_k"],
-                "train_time_sec": train_time_avg,
-                "inference_latency_p50_ms": latency.get("inference_latency_p50_ms", 0.0),
-                "inference_latency_p95_ms": latency.get("inference_latency_p95_ms", 0.0),
-                "best_params": str(best_params),
-                "top_5_features": "",
-                "champion": False,
-            })
+            all_results.append(
+                {
+                    "model_name": model_name,
+                    "channel": channel_name,
+                    "rmse": reg["rmse"],
+                    "mae": reg["mae"],
+                    "r2": reg["r2"],
+                    "smape": reg["smape"],
+                    "mape_pos": reg["mape_pos"],
+                    "hotspot_precision_at_k": hotspot["precision_at_k"],
+                    "hotspot_recall_at_k": hotspot["recall_at_k"],
+                    "train_time_sec": train_time_avg,
+                    "inference_latency_p50_ms": latency.get(
+                        "inference_latency_p50_ms", 0.0
+                    ),
+                    "inference_latency_p95_ms": latency.get(
+                        "inference_latency_p95_ms", 0.0
+                    ),
+                    "best_params": str(best_params),
+                    "top_5_features": "",
+                    "champion": False,
+                }
+            )
 
             # Store trained model for potential saving
             trained_models[channel_name][model_name] = {
@@ -432,7 +474,9 @@ def run_training_competition_gpu(
                 "rmse": reg["rmse"],
             }
 
-            logger.info(f"      RMSE: {reg['rmse']:.4f}, MAE: {reg['mae']:.4f}, Train: {train_time_avg:.1f}s")
+            logger.info(
+                f"      RMSE: {reg['rmse']:.4f}, MAE: {reg['mae']:.4f}, Train: {train_time_avg:.1f}s"
+            )
 
     # ---- Step 6: Champion selection ----
     logger.info("\n[Step 6/7] Selecting champions (per channel, min RMSE)...")
@@ -446,7 +490,9 @@ def run_training_competition_gpu(
             idx = ch_models["rmse"].idxmin()
             results_df.loc[idx, "champion"] = True
             champ = results_df.loc[idx]
-            logger.info(f"  {channel} champion: {champ['model_name']} (RMSE: {champ['rmse']:.4f})")
+            logger.info(
+                f"  {channel} champion: {champ['model_name']} (RMSE: {champ['rmse']:.4f})"
+            )
 
     # ---- Step 7: Save results and models ----
     logger.info("\n[Step 7/7] Saving results and models...")
@@ -491,14 +537,16 @@ def run_training_competition_gpu(
             "saved_at": pd.Timestamp.now(tz="UTC").isoformat(),
             "models": saved_models,
             "weather_features": [
-                col for col in saved_models.get("rich", saved_models.get("base", {}))
-                .get("feature_columns", [])
+                col
+                for col in saved_models.get("rich", saved_models.get("base", {})).get(
+                    "feature_columns", []
+                )
                 if "weather" in col.lower()
             ],
             "usage": {
                 "load_model": "joblib.load('results/models/champion_rich.joblib')",
                 "inference_with_weather": "from dgxb_gpu.inference import prepare_inference_features, batch_inference_with_weather",
-            }
+            },
         }
         metadata_path = models_dir / "model_metadata.json"
         with open(metadata_path, "w") as f:

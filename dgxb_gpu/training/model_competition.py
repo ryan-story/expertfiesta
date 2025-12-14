@@ -14,11 +14,11 @@ import time
 from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
-import pandas as pd
 
 # Try to import cupy, fall back to numpy
 try:
     import cupy as cp
+
     HAS_CUPY = True
 except ImportError:
     cp = np  # type: ignore
@@ -39,14 +39,17 @@ logger = logging.getLogger(__name__)
 # GPU utilities
 # -----------------------------------------------------------------------------
 
+
 def _has_cuda_gpu() -> bool:
     """Check if CUDA GPU is available for XGBoost."""
     try:
         # Try to create a small XGBoost model with GPU
         import xgboost as xgb
+
         # Check if GPU device is available by trying to use it
-        test_model = xgb.XGBRegressor(tree_method='hist', device='cuda', n_estimators=1)
+        test_model = xgb.XGBRegressor(tree_method="hist", device="cuda", n_estimators=1)
         import numpy as np
+
         X_test = np.random.rand(10, 2).astype(np.float32)
         y_test = np.random.rand(10).astype(np.float32)
         test_model.fit(X_test, y_test, verbose=False)
@@ -57,9 +60,9 @@ def _has_cuda_gpu() -> bool:
 
 def _to_numpy(arr: Any) -> np.ndarray:
     """Convert array to numpy (from cupy or pandas)."""
-    if hasattr(arr, 'get'):  # cupy
+    if hasattr(arr, "get"):  # cupy
         return arr.get()
-    elif hasattr(arr, 'values'):  # pandas
+    elif hasattr(arr, "values"):  # pandas
         return arr.values
     return np.asarray(arr)
 
@@ -85,6 +88,7 @@ def _sample_param_dicts(
 # scikit-learn models (CPU fallbacks)
 # -----------------------------------------------------------------------------
 
+
 def train_linear_regression_gpu(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -98,7 +102,7 @@ def train_linear_regression_gpu(
 
     X = _to_numpy(X_train)
     y = _to_numpy(y_train)
-    
+
     # Handle NaN
     X = np.nan_to_num(X, nan=0.0)
 
@@ -164,7 +168,7 @@ def train_random_forest_gpu(
     seed = 42
     X = _to_numpy(X_train)
     y = _to_numpy(y_train)
-    
+
     # Handle NaN
     X = np.nan_to_num(X, nan=0.0)
 
@@ -228,12 +232,18 @@ def train_random_forest_gpu(
     logger.info(f"  Best CV RMSE: {best_rmse:.4f} ± {best_rmse_std:.4f}")
     logger.info(f"  Training time: {train_time:.2f}s")
 
-    return best_model, best_params, {"rmse": best_rmse, "rmse_std": best_rmse_std}, train_time
+    return (
+        best_model,
+        best_params,
+        {"rmse": best_rmse, "rmse_std": best_rmse_std},
+        train_time,
+    )
 
 
 # -----------------------------------------------------------------------------
 # XGBoost GPU
 # -----------------------------------------------------------------------------
+
 
 def train_xgboost_gpu(
     X_train: np.ndarray,
@@ -247,7 +257,7 @@ def train_xgboost_gpu(
     """
     use_gpu = _has_cuda_gpu()
     device = "cuda" if use_gpu else "cpu"
-    
+
     logger.info(f"Training XGBoost ({device.upper()})...")
     t0 = time.time()
 
@@ -338,7 +348,12 @@ def train_xgboost_gpu(
     logger.info(f"  Best CV RMSE: {best_rmse:.4f} ± {best_rmse_std:.4f}")
     logger.info(f"  Training time: {train_time:.2f}s")
 
-    return best_model, best_params, {"rmse": best_rmse, "rmse_std": best_rmse_std}, train_time
+    return (
+        best_model,
+        best_params,
+        {"rmse": best_rmse, "rmse_std": best_rmse_std},
+        train_time,
+    )
 
 
 # Aliases for backward compatibility

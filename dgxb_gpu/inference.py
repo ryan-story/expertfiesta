@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class WeatherCacheConfig:
     """Configuration for weather caching."""
+
     cache_dir: str = "weather-cache"
     cache_ttl_hours: int = 1  # How long cached data is valid
     fallback_to_historical: bool = True  # Use recent historical if forecast fails
@@ -75,10 +76,9 @@ class InferenceWeatherProvider:
     def session(self):
         if self._session is None:
             import requests
+
             self._session = requests.Session()
-            self._session.headers.update({
-                "User-Agent": "DGXB-Inference/1.0"
-            })
+            self._session.headers.update({"User-Agent": "DGXB-Inference/1.0"})
         return self._session
 
     def _cache_key(self, lat: float, lon: float, hour: datetime) -> str:
@@ -92,7 +92,9 @@ class InferenceWeatherProvider:
         """Check in-memory cache."""
         if key in self._memory_cache:
             cached_time, data = self._memory_cache[key]
-            age_hours = (datetime.now(timezone.utc) - cached_time).total_seconds() / 3600
+            age_hours = (
+                datetime.now(timezone.utc) - cached_time
+            ).total_seconds() / 3600
             if age_hours < self.config.cache_ttl_hours:
                 logger.debug(f"Memory cache hit: {key}")
                 return data
@@ -169,24 +171,34 @@ class InferenceWeatherProvider:
         if not times:
             return None
 
-        df = pd.DataFrame({
-            "timestamp": pd.to_datetime(times, utc=True),
-            "lat": lat,
-            "lon": lon,
-            "weather_temperature": hourly.get("temperature_2m", [None] * len(times)),
-            "weather_humidity": hourly.get("relative_humidity_2m", [None] * len(times)),
-            "weather_dewpoint": hourly.get("dewpoint_2m", [None] * len(times)),
-            "weather_wind_speed": hourly.get("wind_speed_10m", [None] * len(times)),
-            "weather_precipitation_amount": hourly.get("precipitation", [None] * len(times)),
-            "weather_precipitation_probability": hourly.get("precipitation_probability", [None] * len(times)),
-            "data_source": "forecast",
-        })
+        df = pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(times, utc=True),
+                "lat": lat,
+                "lon": lon,
+                "weather_temperature": hourly.get(
+                    "temperature_2m", [None] * len(times)
+                ),
+                "weather_humidity": hourly.get(
+                    "relative_humidity_2m", [None] * len(times)
+                ),
+                "weather_dewpoint": hourly.get("dewpoint_2m", [None] * len(times)),
+                "weather_wind_speed": hourly.get("wind_speed_10m", [None] * len(times)),
+                "weather_precipitation_amount": hourly.get(
+                    "precipitation", [None] * len(times)
+                ),
+                "weather_precipitation_probability": hourly.get(
+                    "precipitation_probability", [None] * len(times)
+                ),
+                "data_source": "forecast",
+            }
+        )
 
         # Convert Celsius to Fahrenheit
         if "weather_temperature" in df.columns:
-            df["weather_temperature"] = df["weather_temperature"] * 9/5 + 32
+            df["weather_temperature"] = df["weather_temperature"] * 9 / 5 + 32
         if "weather_dewpoint" in df.columns:
-            df["weather_dewpoint"] = df["weather_dewpoint"] * 9/5 + 32
+            df["weather_dewpoint"] = df["weather_dewpoint"] * 9 / 5 + 32
 
         return df
 
@@ -216,7 +228,9 @@ class InferenceWeatherProvider:
             return cached
 
         # Fetch from API
-        logger.info(f"Fetching forecast for ({lat:.2f}, {lon:.2f}) at {target_hour_floor}")
+        logger.info(
+            f"Fetching forecast for ({lat:.2f}, {lon:.2f}) at {target_hour_floor}"
+        )
         df = self._fetch_forecast(lat, lon, target_hour)
 
         if df is not None and len(df) > 0:
@@ -280,7 +294,9 @@ class InferenceWeatherProvider:
                 for cell in cells:
                     cell_weather = weather_df.copy()
                     cell_weather["h3_cell"] = cell
-                    cell_weather["hour_ts"] = target_hour.replace(minute=0, second=0, microsecond=0)
+                    cell_weather["hour_ts"] = target_hour.replace(
+                        minute=0, second=0, microsecond=0
+                    )
                     all_weather.append(cell_weather)
 
         if not all_weather:
@@ -366,19 +382,24 @@ def prepare_inference_features(
 
         # Add weather columns
         weather_cols = [
-            "weather_temperature", "weather_humidity", "weather_dewpoint",
-            "weather_wind_speed", "weather_precipitation_amount",
-            "weather_precipitation_probability"
+            "weather_temperature",
+            "weather_humidity",
+            "weather_dewpoint",
+            "weather_wind_speed",
+            "weather_precipitation_amount",
+            "weather_precipitation_probability",
         ]
         for col in weather_cols:
             if col in weather_df.columns:
                 features[col] = weather_df[col].values
     else:
         # Create basic structure without weather
-        features = pd.DataFrame({
-            "h3_cell": h3_cells,
-            "hour_ts": [target_hour_floor] * len(h3_cells),
-        })
+        features = pd.DataFrame(
+            {
+                "h3_cell": h3_cells,
+                "hour_ts": [target_hour_floor] * len(h3_cells),
+            }
+        )
         logger.warning("No weather data available, features will have missing weather")
 
     # Add temporal features
@@ -453,12 +474,18 @@ def batch_inference_with_weather(
             predictions = [np.nan] * len(h3_cells)
 
         # Build result
-        result = pd.DataFrame({
-            "h3_cell": h3_cells,
-            "target_hour": target_hour,
-            "prediction": predictions,
-            "has_weather": features["has_weather_data"].values if "has_weather_data" in features.columns else 1,
-        })
+        result = pd.DataFrame(
+            {
+                "h3_cell": h3_cells,
+                "target_hour": target_hour,
+                "prediction": predictions,
+                "has_weather": (
+                    features["has_weather_data"].values
+                    if "has_weather_data" in features.columns
+                    else 1
+                ),
+            }
+        )
         all_predictions.append(result)
 
     return pd.concat(all_predictions, ignore_index=True)
@@ -538,9 +565,7 @@ class IncidentPredictionService:
 
         if channel not in metadata.get("models", {}):
             available = list(metadata.get("models", {}).keys())
-            raise ValueError(
-                f"Channel '{channel}' not found. Available: {available}"
-            )
+            raise ValueError(f"Channel '{channel}' not found. Available: {available}")
 
         model_info = metadata["models"][channel]
 
@@ -610,14 +635,16 @@ class IncidentPredictionService:
         predictions = np.maximum(predictions, 0)  # No negative incidents
 
         # Build result
-        result = pd.DataFrame({
-            "h3_cell": h3_cells,
-            "target_hour": target_hour_floor,
-            "predicted_incidents": predictions,
-            "has_weather_data": features.get("has_weather_data", 1),
-            "model_name": self.model_name,
-            "prediction_timestamp": datetime.now(timezone.utc),
-        })
+        result = pd.DataFrame(
+            {
+                "h3_cell": h3_cells,
+                "target_hour": target_hour_floor,
+                "predicted_incidents": predictions,
+                "has_weather_data": features.get("has_weather_data", 1),
+                "model_name": self.model_name,
+                "prediction_timestamp": datetime.now(timezone.utc),
+            }
+        )
 
         # Add weather values if available
         for col in self.weather_features:
@@ -650,9 +677,7 @@ class IncidentPredictionService:
         elif start_hour.tzinfo is None:
             start_hour = start_hour.replace(tzinfo=timezone.utc)
 
-        target_hours = [
-            start_hour + timedelta(hours=i) for i in range(hours_ahead)
-        ]
+        target_hours = [start_hour + timedelta(hours=i) for i in range(hours_ahead)]
 
         all_predictions = []
         for target_hour in target_hours:
@@ -680,8 +705,7 @@ class IncidentPredictionService:
         """
         predictions = self.predict(h3_cells, target_hour)
         return (
-            predictions
-            .sort_values("predicted_incidents", ascending=False)
+            predictions.sort_values("predicted_incidents", ascending=False)
             .head(top_k)
             .reset_index(drop=True)
         )
@@ -707,13 +731,17 @@ if __name__ == "__main__":
 
     if len(weather) > 0:
         print(f"    Weather columns: {list(weather.columns)}")
-        print(f"    Temperature range: {weather['weather_temperature'].min():.1f} - {weather['weather_temperature'].max():.1f} F")
+        print(
+            f"    Temperature range: {weather['weather_temperature'].min():.1f} - {weather['weather_temperature'].max():.1f} F"
+        )
 
     # 2. Prepare inference features
     print("\n[2] Preparing inference features with weather...")
     features = prepare_inference_features(test_cells, target)
     print(f"    Features shape: {features.shape}")
-    print(f"    Weather features: {[c for c in features.columns if 'weather' in c.lower()]}")
+    print(
+        f"    Weather features: {[c for c in features.columns if 'weather' in c.lower()]}"
+    )
 
     # 3. Try loading prediction service (if model exists)
     print("\n[3] Loading prediction service...")
@@ -727,7 +755,11 @@ if __name__ == "__main__":
         print("\n[4] Making predictions with real-time weather...")
         predictions = service.predict(test_cells, target)
         print(f"    Predictions for {len(predictions)} cells:")
-        print(predictions[["h3_cell", "target_hour", "predicted_incidents", "has_weather_data"]].to_string(index=False))
+        print(
+            predictions[
+                ["h3_cell", "target_hour", "predicted_incidents", "has_weather_data"]
+            ].to_string(index=False)
+        )
 
         # Get hotspots
         print("\n[5] Getting top hotspots...")
@@ -741,6 +773,8 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Usage in production:")
     print("  from dgxb_gpu.inference import IncidentPredictionService")
-    print("  service = IncidentPredictionService.from_training_results('results/models')")
+    print(
+        "  service = IncidentPredictionService.from_training_results('results/models')"
+    )
     print("  predictions = service.predict(h3_cells, target_hour)")
     print("=" * 60)
