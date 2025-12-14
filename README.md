@@ -3,6 +3,9 @@
 Short submission presentation:
 https://www.youtube.com/watch?v=f4dKpnCYMuc
 
+Slides:
+notes/Traffic Incident Forecast (1).pptx
+
 ## RESULT HIGHLIGHTS
 
 ### CPU vs GPU Champion Comparison (Rich Features)
