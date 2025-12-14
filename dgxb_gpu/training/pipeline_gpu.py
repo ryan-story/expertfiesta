@@ -3,14 +3,26 @@ GPU Training Pipeline (XGBoost GPU + scikit-learn)
 
 This version works on ARM64 (Grace Blackwell) without cuDF/cuML dependencies.
 Uses pandas/numpy with GPU-accelerated XGBoost.
+
+Model saving:
+- Champion models are saved to {results_dir}/models/
+- Feature columns saved to {results_dir}/models/feature_columns.json
+- Use dgxb_gpu.inference to load and serve with real-time weather
 """
 
+import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import logging
 import time
 from typing import List, Any, Dict, Tuple
+
+try:
+    import joblib
+    HAS_JOBLIB = True
+except ImportError:
+    HAS_JOBLIB = False
 
 from .model_competition import (
     train_linear_regression_gpu,
@@ -226,6 +238,9 @@ def run_training_competition_gpu(
 
     all_results: List[Dict[str, Any]] = []
 
+    # Track trained models for saving
+    trained_models: Dict[str, Dict[str, Any]] = {}
+
     channels = [
         ("base", base_X),
         ("rich", rich_X),
@@ -239,6 +254,7 @@ def run_training_competition_gpu(
 
     for channel_name, X_df in channels:
         logger.info(f"\n  Channel: {channel_name}")
+        trained_models[channel_name] = {}
 
         # Keep numerics and impute
         X_num = _numeric_only(X_df)
@@ -408,6 +424,14 @@ def run_training_competition_gpu(
                 "champion": False,
             })
 
+            # Store trained model for potential saving
+            trained_models[channel_name][model_name] = {
+                "model": model,
+                "feature_columns": list(X_num.columns),
+                "best_params": best_params,
+                "rmse": reg["rmse"],
+            }
+
             logger.info(f"      RMSE: {reg['rmse']:.4f}, MAE: {reg['mae']:.4f}, Train: {train_time_avg:.1f}s")
 
     # ---- Step 6: Champion selection ----
@@ -424,15 +448,68 @@ def run_training_competition_gpu(
             champ = results_df.loc[idx]
             logger.info(f"  {channel} champion: {champ['model_name']} (RMSE: {champ['rmse']:.4f})")
 
-    # ---- Step 7: Save ----
-    logger.info("\n[Step 7/7] Saving results...")
+    # ---- Step 7: Save results and models ----
+    logger.info("\n[Step 7/7] Saving results and models...")
     out_dir = Path(results_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "gpu_training_results.csv"
     results_df.to_csv(out_file, index=False)
 
+    # Save champion models for deployment
+    models_dir = out_dir / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    saved_models = {}
+    for channel in ["base", "rich"]:
+        champions = results_df[
+            (results_df["champion"]) & (results_df["channel"] == channel)
+        ]
+        if len(champions) > 0:
+            champ_name = champions.iloc[0]["model_name"]
+            if channel in trained_models and champ_name in trained_models[channel]:
+                model_info = trained_models[channel][champ_name]
+
+                # Save model
+                if HAS_JOBLIB:
+                    model_path = models_dir / f"champion_{channel}.joblib"
+                    joblib.dump(model_info["model"], model_path)
+                    logger.info(f"  Saved {channel} champion model: {model_path}")
+
+                    saved_models[channel] = {
+                        "model_name": champ_name,
+                        "model_path": str(model_path),
+                        "feature_columns": model_info["feature_columns"],
+                        "best_params": model_info["best_params"],
+                        "rmse": model_info["rmse"],
+                    }
+                else:
+                    logger.warning("joblib not available, skipping model save")
+
+    # Save model metadata (feature columns, etc.)
+    if saved_models:
+        metadata = {
+            "saved_at": pd.Timestamp.now(tz="UTC").isoformat(),
+            "models": saved_models,
+            "weather_features": [
+                col for col in saved_models.get("rich", saved_models.get("base", {}))
+                .get("feature_columns", [])
+                if "weather" in col.lower()
+            ],
+            "usage": {
+                "load_model": "joblib.load('results/models/champion_rich.joblib')",
+                "inference_with_weather": "from dgxb_gpu.inference import prepare_inference_features, batch_inference_with_weather",
+            }
+        }
+        metadata_path = models_dir / "model_metadata.json"
+        with open(metadata_path, "w") as f:
+            json.dump(metadata, f, indent=2, default=str)
+        logger.info(f"  Saved model metadata: {metadata_path}")
+
     total_time = time.time() - pipeline_start
     logger.info(f"\n✓ GPU training competition complete. Total time: {total_time:.2f}s")
     logger.info(f"  Results: {out_file}")
+    if saved_models:
+        logger.info(f"  Models saved to: {models_dir}")
+        logger.info("  Use dgxb_gpu.inference for deployment with real-time weather")
 
     return results_df

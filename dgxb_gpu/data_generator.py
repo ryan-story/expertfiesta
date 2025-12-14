@@ -6,11 +6,12 @@ GPU acceleration benefits:
 - Configurable scale (100K to millions of rows)
 - Realistic temporal patterns (hourly, daily, weekly seasonality)
 - Spatial patterns across H3 hexagonal grid
-- Weather correlations with traffic
+- Weather correlations with traffic (synthetic OR real via Open-Meteo API)
 - Incident hotspots with spatial clustering
 
 Usage:
     python data_generator.py --rows 500000 --days 90 --h3_cells 200
+    python data_generator.py --days 30 --cells 50 --use-real-weather
 """
 
 from __future__ import annotations
@@ -19,9 +20,9 @@ import argparse
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -45,35 +46,267 @@ class DataGenConfig:
     n_days: int = 90                    # Number of days of data
     n_h3_cells: int = 200               # Number of H3 hexagonal cells (locations)
     h3_resolution: int = 8              # H3 resolution (8 = ~0.74 km² hexagons)
-    
+
     # Port location (Long Beach, CA area)
     center_lat: float = 33.7701
     center_lon: float = -118.1937
-    
+
     # Traffic patterns
     base_traffic_rate: float = 50.0     # Base hourly traffic count
     traffic_std: float = 15.0           # Standard deviation
-    
+
     # Temporal patterns (amplitudes for seasonality)
     hourly_amplitude: float = 0.3       # Hour-of-day effect
     daily_amplitude: float = 0.2        # Day-of-week effect
     weekly_amplitude: float = 0.1       # Week-of-year trend
-    
-    # Weather parameters
+
+    # Weather parameters (for synthetic generation)
     base_temp: float = 70.0             # Base temperature (°F)
     temp_daily_range: float = 15.0      # Daily temperature swing
     temp_seasonal_range: float = 20.0   # Seasonal temperature swing
-    
+
+    # Real weather API settings
+    use_real_weather: bool = False      # Use Open-Meteo API instead of synthetic
+    weather_cache_dir: str = "weather-cache"  # Cache directory for real weather data
+
     # Incident parameters
     incident_rate: float = 0.15         # Base incident probability
     incident_traffic_correlation: float = 0.4  # How much traffic affects incidents
     incident_weather_correlation: float = 0.2  # How much bad weather affects incidents
     hotspot_cells_pct: float = 0.1      # Percentage of cells that are hotspots
     hotspot_multiplier: float = 3.0     # Incident rate multiplier for hotspots
-    
+
     # Output
     output_dir: str = "generated-data"
     seed: int = 42
+
+
+class RealWeatherFetcher:
+    """
+    Fetches real weather data from Open-Meteo API.
+    Checks cache first, fetches if not available.
+    """
+
+    ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+    FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+    HOURLY_FIELDS = [
+        "temperature_2m",
+        "relative_humidity_2m",
+        "dewpoint_2m",
+        "wind_speed_10m",
+        "precipitation",
+        "precipitation_probability",
+    ]
+
+    def __init__(self, cache_dir: str = "weather-cache"):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._session = None
+
+    @property
+    def session(self):
+        if self._session is None:
+            import requests
+            self._session = requests.Session()
+            self._session.headers.update({
+                "User-Agent": "DGXB-DataGenerator/1.0"
+            })
+        return self._session
+
+    def _get_cache_path(self, lat: float, lon: float, start_date: datetime, end_date: datetime) -> Path:
+        """Generate cache file path for a location and date range."""
+        lat_str = f"{lat:.4f}".replace(".", "_").replace("-", "m")
+        lon_str = f"{lon:.4f}".replace(".", "_").replace("-", "m")
+        start_str = start_date.strftime("%Y%m%d")
+        end_str = end_date.strftime("%Y%m%d")
+        return self.cache_dir / f"weather_{lat_str}_{lon_str}_{start_str}_{end_str}.parquet"
+
+    def _check_cache(self, lat: float, lon: float, start_date: datetime, end_date: datetime) -> Optional[pd.DataFrame]:
+        """Check if weather data exists in cache."""
+        cache_path = self._get_cache_path(lat, lon, start_date, end_date)
+        if cache_path.exists():
+            try:
+                df = pd.read_parquet(cache_path)
+                logger.info(f"Weather cache hit: {cache_path}")
+                return df
+            except Exception as e:
+                logger.warning(f"Failed to read cache {cache_path}: {e}")
+        return None
+
+    def _save_cache(self, df: pd.DataFrame, lat: float, lon: float, start_date: datetime, end_date: datetime):
+        """Save weather data to cache."""
+        cache_path = self._get_cache_path(lat, lon, start_date, end_date)
+        try:
+            df.to_parquet(cache_path, index=False)
+            logger.info(f"Weather cached: {cache_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save cache {cache_path}: {e}")
+
+    def fetch_weather(
+        self,
+        lat: float,
+        lon: float,
+        start_date: datetime,
+        end_date: datetime,
+        use_cache: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Fetch weather data for a location and date range.
+        Checks cache first, then fetches from API if needed.
+        """
+        if start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=timezone.utc)
+        if end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
+
+        # Check cache
+        if use_cache:
+            cached = self._check_cache(lat, lon, start_date, end_date)
+            if cached is not None:
+                return cached
+
+        # Determine if historical or forecast
+        now = datetime.now(timezone.utc)
+        all_data = []
+
+        # Historical data (past dates)
+        if start_date < now:
+            hist_end = min(end_date, now - timedelta(days=1))
+            if start_date < hist_end:
+                hist_df = self._fetch_from_api(
+                    lat, lon, start_date, hist_end, self.ARCHIVE_URL, "historical"
+                )
+                if hist_df is not None and len(hist_df) > 0:
+                    all_data.append(hist_df)
+
+        # Forecast data (future dates)
+        if end_date > now:
+            forecast_start = max(start_date, now)
+            forecast_df = self._fetch_from_api(
+                lat, lon, forecast_start, end_date, self.FORECAST_URL, "forecast"
+            )
+            if forecast_df is not None and len(forecast_df) > 0:
+                all_data.append(forecast_df)
+
+        if not all_data:
+            logger.warning(f"No weather data fetched for ({lat}, {lon})")
+            return pd.DataFrame()
+
+        result = pd.concat(all_data, ignore_index=True)
+        result = result.drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
+
+        # Save to cache
+        if use_cache and len(result) > 0:
+            self._save_cache(result, lat, lon, start_date, end_date)
+
+        return result
+
+    def _fetch_from_api(
+        self,
+        lat: float,
+        lon: float,
+        start_date: datetime,
+        end_date: datetime,
+        url: str,
+        source: str,
+    ) -> Optional[pd.DataFrame]:
+        """Fetch weather data from Open-Meteo API."""
+        import time
+
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
+            "hourly": ",".join(self.HOURLY_FIELDS),
+            "timezone": "UTC",
+        }
+
+        try:
+            time.sleep(0.1)  # Rate limiting
+            resp = self.session.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning(f"API request failed for ({lat}, {lon}): {e}")
+            return None
+
+        hourly = data.get("hourly", {})
+        times = hourly.get("time", [])
+        if not times:
+            return None
+
+        df = pd.DataFrame({
+            "timestamp": pd.to_datetime(times, utc=True),
+            "lat": lat,
+            "lon": lon,
+            "weather_temperature": hourly.get("temperature_2m", [None] * len(times)),
+            "weather_humidity": hourly.get("relative_humidity_2m", [None] * len(times)),
+            "weather_dewpoint": hourly.get("dewpoint_2m", [None] * len(times)),
+            "weather_wind_speed": hourly.get("wind_speed_10m", [None] * len(times)),
+            "weather_precipitation_amount": hourly.get("precipitation", [None] * len(times)),
+            "weather_precipitation_probability": hourly.get("precipitation_probability", [None] * len(times)),
+            "data_source": source,
+        })
+
+        # Convert temperature from Celsius to Fahrenheit for consistency
+        if "weather_temperature" in df.columns:
+            df["weather_temperature"] = df["weather_temperature"] * 9/5 + 32
+        if "weather_dewpoint" in df.columns:
+            df["weather_dewpoint"] = df["weather_dewpoint"] * 9/5 + 32
+
+        return df
+
+    def fetch_weather_for_cells(
+        self,
+        h3_cells: List[str],
+        start_date: datetime,
+        end_date: datetime,
+        h3_resolution: int = 8,  # noqa: ARG002 - kept for API compatibility
+    ) -> pd.DataFrame:
+        """
+        Fetch weather for multiple H3 cells.
+        Uses cell centroids as location coordinates.
+        """
+        try:
+            import h3
+        except ImportError:
+            raise ImportError("h3 library required: pip install h3")
+
+        # Get unique locations (cluster nearby cells to reduce API calls)
+        locations: Dict[Tuple[float, float], List[str]] = {}
+
+        for cell in h3_cells:
+            try:
+                lat, lon = h3.cell_to_latlng(cell)
+            except AttributeError:
+                lat, lon = h3.h3_to_geo(cell)
+
+            # Round to reduce API calls (nearby cells share weather)
+            lat_round = round(lat, 2)
+            lon_round = round(lon, 2)
+            key = (lat_round, lon_round)
+
+            if key not in locations:
+                locations[key] = []
+            locations[key].append(cell)
+
+        logger.info(f"Fetching real weather for {len(locations)} unique locations...")
+
+        all_weather = []
+        for (lat, lon), cells in locations.items():
+            weather_df = self.fetch_weather(lat, lon, start_date, end_date)
+            if len(weather_df) > 0:
+                # Assign to all cells in this location
+                for cell in cells:
+                    cell_weather = weather_df.copy()
+                    cell_weather["h3_cell"] = cell
+                    all_weather.append(cell_weather)
+
+        if not all_weather:
+            return pd.DataFrame()
+
+        return pd.concat(all_weather, ignore_index=True)
 
 
 def generate_h3_cells(config: DataGenConfig) -> List[str]:
@@ -192,17 +425,15 @@ def generate_traffic_incidents(
     rng: np.random.Generator
 ) -> pd.DataFrame:
     """Generate traffic counts and incident data with spatial patterns"""
-    n = len(df)
-    
     # Identify hotspot cells (higher incident rates)
     n_hotspots = int(len(h3_cells) * config.hotspot_cells_pct)
     hotspot_cells = set(rng.choice(h3_cells, n_hotspots, replace=False))
-    
+
     # Cell-specific baseline (some cells are busier)
     cell_baselines = {cell: rng.uniform(0.7, 1.3) for cell in h3_cells}
-    
+
     results = []
-    for idx, row in df.iterrows():
+    for _, row in df.iterrows():
         cell = row['h3_cell']
         
         # Traffic count: base * patterns * cell_factor * noise
@@ -413,8 +644,8 @@ def generate_dataset_cpu(config: DataGenConfig) -> Tuple[pd.DataFrame, pd.DataFr
     for hour_idx, ts in enumerate(timestamps):
         temporal = generate_temporal_features(pd.DatetimeIndex([ts]), config).iloc[0]
         weather = generate_weather_data(pd.DatetimeIndex([ts]), config, rng).iloc[0]
-        
-        for cell_idx, cell in enumerate(h3_cells):
+
+        for cell in h3_cells:
             row = {
                 'hour_ts': ts,
                 'h3_cell': cell,
@@ -422,7 +653,7 @@ def generate_dataset_cpu(config: DataGenConfig) -> Tuple[pd.DataFrame, pd.DataFr
                 **weather.to_dict(),
             }
             rows.append(row)
-        
+
         if (hour_idx + 1) % 100 == 0:
             logger.info(f"  Generated {(hour_idx + 1) * len(h3_cells):,} rows...")
     
@@ -462,6 +693,13 @@ def save_dataset(
     y_df.to_parquet(y_path, index=False)
     logger.info(f"Saved y target: {y_path}")
     
+    # Determine weather source stats
+    weather_source_stats = {}
+    if 'weather_source' in X_df.columns:
+        weather_source_stats = X_df['weather_source'].value_counts().to_dict()
+    else:
+        weather_source_stats = {'synthetic': len(X_df)}
+
     # Save metadata
     meta = {
         'generated_at': datetime.now().isoformat(),
@@ -470,6 +708,7 @@ def save_dataset(
             'n_h3_cells': config.n_h3_cells,
             'h3_resolution': config.h3_resolution,
             'seed': config.seed,
+            'use_real_weather': config.use_real_weather,
         },
         'X_shape': list(X_df.shape),
         'y_shape': list(y_df.shape),
@@ -478,6 +717,10 @@ def save_dataset(
         'date_range': {
             'start': str(X_df['hour_ts'].min()),
             'end': str(X_df['hour_ts'].max()),
+        },
+        'weather': {
+            'source': 'real (Open-Meteo API)' if config.use_real_weather else 'synthetic',
+            'source_distribution': weather_source_stats,
         },
         'statistics': {
             'traffic_count_mean': float(X_df['traffic_count'].mean()) if 'traffic_count' in X_df.columns else None,
@@ -492,16 +735,110 @@ def save_dataset(
     logger.info(f"Saved metadata: {meta_path}")
 
 
+def apply_real_weather(
+    X_df: pd.DataFrame,
+    config: DataGenConfig,
+) -> pd.DataFrame:
+    """
+    Replace synthetic weather with real weather from Open-Meteo API.
+    Checks cache first, fetches if not available.
+    """
+    logger.info("Fetching real weather data from Open-Meteo API...")
+
+    # Get unique H3 cells
+    h3_cells = X_df['h3_cell'].unique().tolist()
+
+    # Get date range from data
+    min_ts = pd.to_datetime(X_df['hour_ts'].min())
+    max_ts = pd.to_datetime(X_df['hour_ts'].max())
+
+    # Ensure timezone
+    if min_ts.tzinfo is None:
+        min_ts = min_ts.tz_localize('UTC')
+    if max_ts.tzinfo is None:
+        max_ts = max_ts.tz_localize('UTC')
+
+    start_date = min_ts.to_pydatetime()
+    end_date = max_ts.to_pydatetime()
+
+    # Fetch real weather
+    fetcher = RealWeatherFetcher(cache_dir=config.weather_cache_dir)
+    weather_df = fetcher.fetch_weather_for_cells(
+        h3_cells=h3_cells,
+        start_date=start_date,
+        end_date=end_date,
+        h3_resolution=config.h3_resolution,
+    )
+
+    if len(weather_df) == 0:
+        logger.warning("No real weather data fetched, keeping synthetic weather")
+        return X_df
+
+    logger.info(f"Fetched {len(weather_df):,} real weather records")
+
+    # Prepare weather for merge
+    weather_df['hour_ts'] = weather_df['timestamp'].dt.floor('h')
+
+    # Weather columns to update
+    weather_cols = [
+        'weather_temperature', 'weather_humidity', 'weather_dewpoint',
+        'weather_wind_speed', 'weather_precipitation_amount',
+        'weather_precipitation_probability'
+    ]
+
+    # Aggregate weather to hour level per cell (in case of duplicates)
+    agg_dict = {col: 'mean' for col in weather_cols if col in weather_df.columns}
+    if 'data_source' in weather_df.columns:
+        agg_dict['data_source'] = 'first'
+
+    weather_agg = weather_df.groupby(['h3_cell', 'hour_ts']).agg(agg_dict).reset_index()
+
+    # Drop old weather columns from X_df
+    cols_to_drop = [c for c in weather_cols if c in X_df.columns]
+    X_updated = X_df.drop(columns=cols_to_drop)
+
+    # Merge real weather
+    X_updated = X_updated.merge(
+        weather_agg,
+        on=['h3_cell', 'hour_ts'],
+        how='left'
+    )
+
+    # Fill any missing weather with synthetic fallback
+    for col in weather_cols:
+        if col in X_updated.columns and col in X_df.columns:
+            X_updated[col] = X_updated[col].fillna(X_df[col])
+
+    # Add weather source indicator
+    X_updated['weather_source'] = 'real'
+    if 'data_source' in X_updated.columns:
+        X_updated['weather_source'] = X_updated['data_source'].fillna('real')
+        X_updated = X_updated.drop(columns=['data_source'])
+
+    # Mark rows without real weather
+    missing_mask = X_updated[weather_cols[0]].isna() if weather_cols[0] in X_updated.columns else pd.Series([False] * len(X_updated))
+    X_updated.loc[missing_mask, 'weather_source'] = 'synthetic_fallback'
+
+    real_count = (X_updated['weather_source'] != 'synthetic_fallback').sum()
+    logger.info(f"Applied real weather to {real_count:,} / {len(X_updated):,} rows ({100*real_count/len(X_updated):.1f}%)")
+
+    return X_updated
+
+
 def generate_and_save(config: DataGenConfig) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Main entry point: generate and save dataset"""
-    
+
     if HAS_GPU:
         X_df, y_df = generate_dataset_gpu(config)
     else:
         X_df, y_df = generate_dataset_cpu(config)
-    
+
+    # Apply real weather if requested
+    if config.use_real_weather:
+        X_df = apply_real_weather(X_df, config)
+
     save_dataset(X_df, y_df, config)
-    
+
     return X_df, y_df
 
 
@@ -511,21 +848,34 @@ def main():
     parser.add_argument('--cells', type=int, default=200, help='Number of H3 cells')
     parser.add_argument('--output', type=str, default='generated-data', help='Output directory')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    
+    parser.add_argument(
+        '--use-real-weather',
+        action='store_true',
+        help='Use real weather data from Open-Meteo API instead of synthetic'
+    )
+    parser.add_argument(
+        '--weather-cache-dir',
+        type=str,
+        default='weather-cache',
+        help='Directory to cache weather API responses'
+    )
+
     args = parser.parse_args()
-    
+
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
-    
+
     config = DataGenConfig(
         n_days=args.days,
         n_h3_cells=args.cells,
         output_dir=args.output,
         seed=args.seed,
+        use_real_weather=args.use_real_weather,
+        weather_cache_dir=args.weather_cache_dir,
     )
-    
+
     # Calculate expected size
     expected_rows = args.days * 24 * args.cells
     logger.info(f"Generating dataset:")
@@ -533,15 +883,17 @@ def main():
     logger.info(f"  H3 Cells: {args.cells}")
     logger.info(f"  Expected rows: {expected_rows:,}")
     logger.info(f"  Output: {args.output}")
-    
+    logger.info(f"  Weather source: {'Real (Open-Meteo API)' if args.use_real_weather else 'Synthetic'}")
+
     X_df, y_df = generate_and_save(config)
-    
+
     print("\n" + "=" * 70)
     print("DATA GENERATION COMPLETE")
     print("=" * 70)
-    print(f"X features: {X_df.shape[0]:,} rows × {X_df.shape[1]} columns")
+    print(f"X features: {X_df.shape[0]:,} rows x {X_df.shape[1]} columns")
     print(f"y target: {y_df.shape[0]:,} rows")
     print(f"Output directory: {config.output_dir}")
+    print(f"Weather source: {'Real (Open-Meteo API)' if config.use_real_weather else 'Synthetic'}")
     print("=" * 70)
 
 
