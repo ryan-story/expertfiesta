@@ -21,7 +21,7 @@ notes/Traffic Incident Forecast (1).pptx
 | **Hotspot Recall@K** | 0.9467 | **0.9956** | GPU: +5.2% better |
 | **Training Time** | **5.26s** | 42.98s | CPU: 8.2x faster |
 | **Total Pipeline Time** | **~62s** | 411.54s (~7 min) | CPU: 6.6x faster |
-| **Inference Latency (p50)** | Not reported | **5.37ms** | GPU: Very fast inference |
+| **Inference Latency (p50)** | 11.74ms | **5.37ms** | GPU: Very fast inference |
 | **Number of Features** | 110 | 108 | CPU: +2 features |
 | **Training Rows** | 5,498 | 5,498 | Same dataset |
 | **CV Folds** | 3 (nested, time-blocked) | 3 (nested, time-blocked) | Same methodology |
