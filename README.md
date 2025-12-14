@@ -1,5 +1,8 @@
 # DGXB Data Product & Benchmark Architecture
 
+Short submission presentation:
+https://www.youtube.com/watch?v=f4dKpnCYMuc
+
 ## RESULT HIGHLIGHTS
 
 ### CPU vs GPU Champion Comparison (Rich Features)
