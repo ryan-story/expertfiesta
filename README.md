@@ -1,7 +1,7 @@
 # DGXB Data Product & Benchmark Architecture
 
 Short submission presentation:
-https://www.youtube.com/watch?v=f4dKpnCYMuc
+notes/video1332510549.mp4.zip
 
 Slides:
 notes/Traffic Incident Forecast (1).pptx
